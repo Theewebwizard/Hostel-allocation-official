@@ -56,7 +56,7 @@ export default function Home() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-100 via-white to-purple-100">
+    <div className="min-h-screen bg-linear-to-br from-indigo-100 via-white to-purple-100">
       {/* Header */}
       <header className="p-6 flex justify-between items-center max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
