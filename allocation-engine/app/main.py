@@ -39,16 +39,82 @@ async def fetch_data_from_core_services():
     """Fetch students, groups, hostels, and rooms from core services"""
     async with httpx.AsyncClient() as client:
         try:
-            # In a real implementation, these would be actual API calls
-            # For now, return empty data as placeholder
+            # Fetch data from the core services API
+            response = await client.get(
+                f"{settings.core_services_url}/allocation-data",
+                timeout=30.0
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Transform the data to match the expected format
+            from .models import Student, Group, Hostel, Room, GenderType, RoomStatus
+
+            students = [
+                Student(
+                    user_id=s['userId'],
+                    roll_number=s['rollNumber'],
+                    full_name=s['fullName'],
+                    year=s['year'],
+                    gender=GenderType(s.get('gender', 'male')),
+                    program=s.get('program')
+                )
+                for s in data.get('students', [])
+            ]
+
+            groups = [
+                Group(
+                    id=g['id'],
+                    name=g['name'],
+                    creator_id=g['creatorId'],
+                    members=[
+                        Student(
+                            user_id=m['userId'],
+                            roll_number=m['rollNumber'],
+                            full_name=m['fullName'],
+                            year=m['year'],
+                            gender=GenderType(m.get('gender', 'male')),
+                            program=m.get('program')
+                        )
+                        for m in g.get('members', [])
+                    ]
+                )
+                for g in data.get('groups', [])
+            ]
+
+            hostels = [
+                Hostel(
+                    id=h['id'],
+                    name=h['name'],
+                    gender_type=GenderType(h['genderType'])
+                )
+                for h in data.get('hostels', [])
+            ]
+
+            rooms = [
+                Room(
+                    id=r['id'],
+                    hostel_id=r['hostelId'],
+                    room_number=r['roomNumber'],
+                    floor=r.get('floor'),
+                    wing=r.get('wing'),
+                    capacity=r['capacity'],
+                    room_type=r.get('roomType', 'double'),
+                    status=RoomStatus(r.get('status', 'available'))
+                )
+                for r in data.get('rooms', [])
+            ]
+
             return {
-                "students": [],
-                "groups": [],
-                "hostels": [],
-                "rooms": []
+                "students": students,
+                "groups": groups,
+                "hostels": hostels,
+                "rooms": rooms
             }
         except httpx.RequestError as e:
             raise HTTPException(status_code=503, detail=f"Core services unavailable: {str(e)}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to process data: {str(e)}")
 
 
 async def run_allocation_task(run_id: str, rules: list):

@@ -138,7 +138,7 @@ Core Services (`.env`):
 
 ```env
 DB_HOST=localhost
-DB_PORT=5432
+DB_PORT=5433
 DB_USERNAME=postgres
 DB_PASSWORD=postgres
 DB_DATABASE=hostel_allocation

@@ -5,7 +5,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # Database
     db_host: str = "localhost"
-    db_port: int = 5432
+    db_port: int = 5433
     db_username: str = "postgres"
     db_password: str = "postgres"
     db_database: str = "hostel_allocation"

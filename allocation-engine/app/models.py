@@ -24,6 +24,7 @@ class Student(BaseModel):
     roll_number: str
     full_name: str
     year: int
+    gender: GenderType = GenderType.MALE
     program: Optional[str] = None
 
 
@@ -61,7 +62,7 @@ class AllocationRule(BaseModel):
 
 
 class AllocationRequest(BaseModel):
-    allocation_run_id: str
+    allocation_run_id: Optional[str] = None
     rules: List[AllocationRule]
 
 
@@ -72,6 +73,8 @@ class AllocationResult(BaseModel):
     room_number: str
     wing: Optional[str] = None
     floor: Optional[int] = None
+    group_id: Optional[int] = None
+    happiness: int = 50  # 0-100 score
 
 
 class AllocationResponse(BaseModel):

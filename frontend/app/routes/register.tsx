@@ -8,6 +8,7 @@ import {
   Hash,
   GraduationCap,
   BookOpen,
+  Users,
 } from "lucide-react";
 import {
   Button,
@@ -43,6 +44,7 @@ export default function RegisterPage() {
     rollNumber: "",
     fullName: "",
     year: 1,
+    gender: "male" as "male" | "female",
     program: "",
   });
   const [error, setError] = useState("");
@@ -93,6 +95,7 @@ export default function RegisterPage() {
           rollNumber: formData.rollNumber,
           fullName: formData.fullName,
           year: formData.year,
+          gender: formData.gender,
           program: formData.program,
         }),
       });
@@ -226,6 +229,20 @@ export default function RegisterPage() {
                   </div>
 
                   <div className="relative">
+                    <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <select
+                      name="gender"
+                      value={formData.gender}
+                      onChange={handleChange}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      required
+                    >
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                    </select>
+                  </div>
+
+                  <div className="relative">
                     <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                     <Input
                       type="text"
@@ -257,14 +274,21 @@ export default function RegisterPage() {
 
                     <div className="relative">
                       <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                      <Input
-                        type="text"
+                      <select
                         name="program"
-                        placeholder="Program"
                         value={formData.program}
                         onChange={handleChange}
-                        className="pl-10"
-                      />
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        required
+                      >
+                        <option value="">Select Program</option>
+                        <option value="BTech ECE">BTech ECE</option>
+                        <option value="BTech CSE">BTech CSE</option>
+                        <option value="BTech CCE">BTech CCE</option>
+                        <option value="BTech Mechanical">
+                          BTech Mechanical
+                        </option>
+                      </select>
                     </div>
                   </div>
                 </>
