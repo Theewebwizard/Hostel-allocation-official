@@ -44,17 +44,13 @@ export function DashboardLayout({ children }: SidebarProps) {
 
   const studentMenuItems = [
     { href: "/dashboard", icon: Home, label: "Dashboard" },
-    { href: "/dashboard/groups", icon: Users, label: "My Groups" },
-    { href: "/dashboard/invitations", icon: UserPlus, label: "Invitations" },
+    { href: "/groups", icon: Users, label: "My Group" },
     { href: "/dashboard/profile", icon: User, label: "Profile" },
   ];
 
   const wardenMenuItems = [
-    { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { href: "/dashboard/hostels", icon: Building2, label: "Hostels" },
-    { href: "/dashboard/rooms", icon: BedDouble, label: "Rooms" },
-    { href: "/dashboard/students", icon: Users, label: "Students" },
-    { href: "/dashboard/allocation", icon: Settings, label: "Run Allocation" },
+    { href: "/admin", icon: LayoutDashboard, label: "Admin Dashboard" },
+    { href: "/dashboard", icon: Home, label: "Overview" },
   ];
 
   const menuItems = isWarden ? wardenMenuItems : studentMenuItems;
