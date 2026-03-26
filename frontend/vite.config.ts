@@ -5,4 +5,32 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [tailwindcss(), reactRouter(), tsconfigPaths()],
+  server: {
+    proxy: {
+      "/auth": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+      "/admin": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+        bypass: (req) => {
+          // Allow React Router to handle page navigation to /admin
+          // Only proxy API calls to /admin/*
+          if (req.url === "/admin" && req.method === "GET") {
+            return "/admin"; // Don't proxy, let React Router handle it
+          }
+          return undefined; // Proxy to backend
+        },
+      },
+      "/groups": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+      "/students": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
+    },
+  },
 });

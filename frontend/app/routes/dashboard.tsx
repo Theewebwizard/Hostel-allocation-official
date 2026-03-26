@@ -134,7 +134,7 @@ function StudentDashboard() {
           <CardContent>
             <div className="space-y-3">
               <a
-                href="/dashboard/groups"
+                href="/groups"
                 className="flex items-center gap-3 p-4 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors"
               >
                 <Users className="w-6 h-6 text-indigo-600" />
@@ -148,7 +148,7 @@ function StudentDashboard() {
                 </div>
               </a>
               <a
-                href="/dashboard/invitations"
+                href="/groups"
                 className="flex items-center gap-3 p-4 rounded-lg bg-amber-50 hover:bg-amber-100 transition-colors"
               >
                 <ClipboardCheck className="w-6 h-6 text-amber-600" />
@@ -214,38 +214,14 @@ function WardenDashboard() {
           <CardContent>
             <div className="space-y-3">
               <a
-                href="/dashboard/hostels"
+                href="/admin"
                 className="flex items-center gap-3 p-4 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors"
               >
                 <Building2 className="w-6 h-6 text-indigo-600" />
                 <div>
-                  <p className="font-medium text-gray-900">Manage Hostels</p>
+                  <p className="font-medium text-gray-900">Open Admin Panel</p>
                   <p className="text-sm text-gray-500">
-                    Add, edit, or remove hostels
-                  </p>
-                </div>
-              </a>
-              <a
-                href="/dashboard/rooms"
-                className="flex items-center gap-3 p-4 rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors"
-              >
-                <BedDouble className="w-6 h-6 text-blue-600" />
-                <div>
-                  <p className="font-medium text-gray-900">Manage Rooms</p>
-                  <p className="text-sm text-gray-500">
-                    Configure room details and availability
-                  </p>
-                </div>
-              </a>
-              <a
-                href="/dashboard/allocation"
-                className="flex items-center gap-3 p-4 rounded-lg bg-green-50 hover:bg-green-100 transition-colors"
-              >
-                <ClipboardCheck className="w-6 h-6 text-green-600" />
-                <div>
-                  <p className="font-medium text-gray-900">Run Allocation</p>
-                  <p className="text-sm text-gray-500">
-                    Execute the allocation algorithm
+                    Manage hostels, rooms, and allocations
                   </p>
                 </div>
               </a>
