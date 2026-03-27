@@ -7,5 +7,6 @@ export default [
   route("dashboard", "routes/dashboard.tsx"),
   route("dashboard/profile", "routes/profile.tsx"),
   route("groups", "routes/groups.tsx"),
+  route("swaps", "routes/swaps.tsx"),
   route("admin", "routes/admin.tsx"),
 ] satisfies RouteConfig;

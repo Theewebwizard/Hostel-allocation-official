@@ -26,6 +26,7 @@ class Student(BaseModel):
     year: int
     gender: GenderType = GenderType.MALE
     program: Optional[str] = None
+    application_timestamp: Optional[str] = None  # ISO format timestamp
 
 
 class Group(BaseModel):
@@ -64,6 +65,7 @@ class AllocationRule(BaseModel):
 class AllocationRequest(BaseModel):
     allocation_run_id: Optional[str] = None
     rules: List[AllocationRule]
+    allocation_mode: str = "group_based"  # "group_based" or "fcfs"
 
 
 class AllocationResult(BaseModel):
@@ -77,9 +79,23 @@ class AllocationResult(BaseModel):
     happiness: int = 50  # 0-100 score
 
 
+class AllocationDecisionLog(BaseModel):
+    student_id: str
+    decision_order: int
+    available_rooms: List[dict]
+    constraints_applied: List[dict]
+    group_id: Optional[int] = None
+    group_allocation_strategy: Optional[str] = None
+    selected_room_id: Optional[int] = None
+    decision_reason: str
+    happiness_score: int
+    alternatives_considered: Optional[List[dict]] = None
+
+
 class AllocationResponse(BaseModel):
     run_id: str
     status: str
     total_students: int
     allocated_students: int
     allocations: List[AllocationResult]
+    decision_logs: List[AllocationDecisionLog] = []

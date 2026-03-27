@@ -57,7 +57,8 @@ async def fetch_data_from_core_services():
                     full_name=s['fullName'],
                     year=s['year'],
                     gender=GenderType(s.get('gender', 'male')),
-                    program=s.get('program')
+                    program=s.get('program'),
+                    application_timestamp=s.get('applicationTimestamp')
                 )
                 for s in data.get('students', [])
             ]
@@ -74,7 +75,8 @@ async def fetch_data_from_core_services():
                             full_name=m['fullName'],
                             year=m['year'],
                             gender=GenderType(m.get('gender', 'male')),
-                            program=m.get('program')
+                            program=m.get('program'),
+                            application_timestamp=m.get('applicationTimestamp')
                         )
                         for m in g.get('members', [])
                     ]
@@ -117,14 +119,14 @@ async def fetch_data_from_core_services():
             raise HTTPException(status_code=500, detail=f"Failed to process data: {str(e)}")
 
 
-async def run_allocation_task(run_id: str, rules: list):
+async def run_allocation_task(run_id: str, rules: list, allocation_mode: str = "group_based"):
     """Background task to run allocation"""
     try:
         allocation_runs[run_id]["status"] = "running"
-        
+
         # Fetch data from core services
         data = await fetch_data_from_core_services()
-        
+
         # Create engine and run allocation
         engine = AllocationEngine(
             students=data["students"],
@@ -133,12 +135,13 @@ async def run_allocation_task(run_id: str, rules: list):
             rooms=data["rooms"],
             rules=rules
         )
-        
-        results = engine.run_allocation()
-        
+
+        results = engine.run_allocation(mode=allocation_mode)
+
         allocation_runs[run_id].update({
             "status": "completed",
             "results": results,
+            "decision_logs": engine.decision_logs,
             "total_students": len(data["students"]),
             "allocated_students": len(results)
         })
@@ -163,12 +166,18 @@ async def trigger_allocation(request: AllocationRequest, background_tasks: Backg
     allocation_runs[run_id] = {
         "status": "queued",
         "results": [],
+        "decision_logs": [],
         "total_students": 0,
         "allocated_students": 0
     }
     
     # Run allocation in background
-    background_tasks.add_task(run_allocation_task, run_id, request.rules)
+    background_tasks.add_task(
+        run_allocation_task,
+        run_id,
+        request.rules,
+        request.allocation_mode
+    )
     
     return {
         "run_id": run_id,
@@ -182,15 +191,16 @@ async def get_allocation_result(run_id: str):
     """Get the result of an allocation run"""
     if run_id not in allocation_runs:
         raise HTTPException(status_code=404, detail="Allocation run not found")
-    
+
     run = allocation_runs[run_id]
-    
+
     return AllocationResponse(
         run_id=run_id,
         status=run["status"],
         total_students=run.get("total_students", 0),
         allocated_students=run.get("allocated_students", 0),
-        allocations=run.get("results", [])
+        allocations=run.get("results", []),
+        decision_logs=run.get("decision_logs", [])
     )
 
 

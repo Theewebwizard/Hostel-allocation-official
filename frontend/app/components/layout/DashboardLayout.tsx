@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   BedDouble,
   UserPlus,
+  ArrowLeftRight,
 } from "lucide-react";
 import { useAuthStore } from "~/lib/auth-store";
 
@@ -45,6 +46,7 @@ export function DashboardLayout({ children }: SidebarProps) {
   const studentMenuItems = [
     { href: "/dashboard", icon: Home, label: "Dashboard" },
     { href: "/groups", icon: Users, label: "My Group" },
+    { href: "/swaps", icon: ArrowLeftRight, label: "Room Swaps" },
     { href: "/dashboard/profile", icon: User, label: "Profile" },
   ];
 

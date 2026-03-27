@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from constraint import Problem, AllDifferentConstraint
 
-from .models import Student, Group, Room, Hostel, AllocationRule, AllocationResult
+from .models import Student, Group, Room, Hostel, AllocationRule, AllocationResult, AllocationDecisionLog
 
 
 @dataclass
@@ -49,9 +49,13 @@ class AllocationEngine:
         self.hostels = {h.id: h for h in hostels}
         self.rooms = {r.id: r for r in rooms}
         self.rules = rules
-        
+
         # Build wing structure
         self.wings = self._build_wings(rooms)
+
+        # Decision logging
+        self.decision_logs: List[AllocationDecisionLog] = []
+        self.decision_order = 0
         
     def _build_wings(self, rooms: List[Room]) -> Dict[str, Wing]:
         """Organize rooms into wings"""
@@ -85,7 +89,49 @@ class AllocationEngine:
     def _room_to_wing_key(self, room: Room) -> str:
         """Convert room to wing key using consistent format"""
         return f"{room.hostel_id}||{room.wing or 'main'}||{room.floor or 0}"
-    
+
+    def _log_decision(
+        self,
+        student: Student,
+        available_rooms: List[Room],
+        constraints: List[dict],
+        selected_room: Optional[Room],
+        reason: str,
+        state: 'AllocationState',
+        group_id: Optional[int] = None,
+        strategy: Optional[str] = None,
+        happiness: int = 50,
+        alternatives: Optional[List[dict]] = None
+    ):
+        """Log allocation decision for transparency"""
+        self.decision_order += 1
+
+        log = AllocationDecisionLog(
+            student_id=student.user_id,
+            decision_order=self.decision_order,
+            available_rooms=[
+                {
+                    "roomId": r.id,
+                    "roomNumber": r.room_number,
+                    "hostelName": self.hostels[r.hostel_id].name if r.hostel_id in self.hostels else "Unknown",
+                    "wing": r.wing,
+                    "floor": r.floor,
+                    "capacity": r.capacity,
+                    "currentOccupancy": len(state.room_assignments.get(r.id, []))
+                }
+                for r in available_rooms[:20]  # Limit to top 20 for performance
+            ],
+            constraints_applied=constraints,
+            group_id=group_id,
+            group_allocation_strategy=strategy,
+            selected_room_id=selected_room.id if selected_room else None,
+            decision_reason=reason,
+            happiness_score=happiness,
+            alternatives_considered=alternatives
+        )
+
+        self.decision_logs.append(log)
+
     def _get_valid_rooms_for_student(self, student: Student) -> List[Room]:
         """
         Stage 1: CSP - Filter valid rooms for a student based on rules and gender constraints
@@ -352,9 +398,83 @@ class AllocationEngine:
 
         return None
     
-    def run_allocation(self) -> List[AllocationResult]:
+    def run_allocation(self, mode: str = "group_based") -> List[AllocationResult]:
         """
-        Execute the two-stage allocation algorithm
+        Execute the allocation algorithm based on mode
+        """
+        if mode == "fcfs":
+            return self.run_fcfs_allocation()
+        else:
+            return self.run_group_based_allocation()
+
+    def run_fcfs_allocation(self) -> List[AllocationResult]:
+        """
+        Execute FCFS (First-Come-First-Serve) allocation algorithm.
+        Students are allocated strictly by application timestamp.
+        """
+        results: List[AllocationResult] = []
+
+        # Initialize state
+        state = AllocationState(
+            wing_capacities={k: v.available_beds for k, v in self.wings.items()},
+            room_assignments={},
+            student_allocations={}
+        )
+
+        # Sort students by application timestamp (earliest first)
+        sorted_students = sorted(
+            self.students.values(),
+            key=lambda s: s.application_timestamp or "9999-12-31T23:59:59"
+        )
+
+        for student in sorted_students:
+            if student.user_id in state.student_allocations:
+                continue
+
+            # Get valid rooms using existing CSP logic
+            valid_rooms = self._get_valid_rooms_for_student(student)
+
+            # Sort by occupancy (prefer partially filled rooms for consolidation)
+            valid_rooms.sort(
+                key=lambda r: (-len(state.room_assignments.get(r.id, [])), r.id)
+            )
+
+            # Allocate to first available room
+            for room in valid_rooms:
+                current_occupancy = len(state.room_assignments.get(room.id, []))
+                if current_occupancy < room.capacity:
+                    # Update state
+                    if room.id not in state.room_assignments:
+                        state.room_assignments[room.id] = []
+                    state.room_assignments[room.id].append(student.user_id)
+                    state.student_allocations[student.user_id] = room.id
+
+                    # Update wing capacity
+                    wing_key = self._room_to_wing_key(room)
+                    if wing_key in state.wing_capacities:
+                        state.wing_capacities[wing_key] -= 1
+
+                    # Get hostel info
+                    hostel = self.hostels.get(room.hostel_id)
+
+                    # Create result
+                    results.append(AllocationResult(
+                        student_id=student.user_id,
+                        room_id=room.id,
+                        hostel_name=hostel.name if hostel else "Unknown",
+                        room_number=room.room_number,
+                        wing=room.wing,
+                        floor=room.floor,
+                        group_id=None,  # FCFS doesn't prioritize groups
+                        happiness=60  # Neutral-positive happiness for FCFS
+                    ))
+                    break
+
+        return results
+
+    def run_group_based_allocation(self) -> List[AllocationResult]:
+        """
+        Execute the two-stage group-based allocation algorithm (original logic)
         """
         results: List[AllocationResult] = []
 

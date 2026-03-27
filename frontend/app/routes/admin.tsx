@@ -20,6 +20,7 @@ import {
   Edit2,
   Home,
   LogOut,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   Button,
@@ -34,17 +35,23 @@ import { useAuthStore } from "~/lib/auth-store";
 import {
   adminApi,
   studentsApi,
+  swapsApi,
   type DashboardStats,
   type Hostel,
   type Room,
   type AllocationRule,
   type AllocationRun,
+  type SwapRequest,
+  type SwapChain,
 } from "~/lib/api";
 
 export function meta() {
   return [
     { title: "Admin Panel - Hostel Allocation System" },
-    { name: "description", content: "Manage hostels, rooms, rules, and allocations" },
+    {
+      name: "description",
+      content: "Manage hostels, rooms, rules, and allocations",
+    },
   ];
 }
 
@@ -58,11 +65,23 @@ interface Student {
   gender: string;
 }
 
-type ActiveSection = "hostels" | "rooms" | "rules" | "students" | "allocation";
+type ActiveSection =
+  | "hostels"
+  | "rooms"
+  | "rules"
+  | "students"
+  | "allocation"
+  | "swaps";
 
 export default function AdminPage() {
   const navigate = useNavigate();
-  const { user, isAuthenticated, checkAuth, isLoading: authLoading, logout } = useAuthStore();
+  const {
+    user,
+    isAuthenticated,
+    checkAuth,
+    isLoading: authLoading,
+    logout,
+  } = useAuthStore();
 
   const [activeSection, setActiveSection] = useState<ActiveSection>("hostels");
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -72,6 +91,8 @@ export default function AdminPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [allocationRuns, setAllocationRuns] = useState<AllocationRun[]>([]);
   const [allocationResults, setAllocationResults] = useState<any[]>([]);
+  const [swapRequests, setSwapRequests] = useState<SwapRequest[]>([]);
+  const [swapChains, setSwapChains] = useState<SwapChain[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -88,24 +109,49 @@ export default function AdminPage() {
   const [editedStudent, setEditedStudent] = useState<Partial<Student>>({});
 
   // Filter
-  const [selectedHostelFilter, setSelectedHostelFilter] = useState<number | null>(null);
+  const [selectedHostelFilter, setSelectedHostelFilter] = useState<
+    number | null
+  >(null);
 
   // Form data
-  const [hostelForm, setHostelForm] = useState({ name: "", genderType: "male" });
+  const [hostelForm, setHostelForm] = useState({
+    name: "",
+    genderType: "male",
+  });
   const [roomForm, setRoomForm] = useState({
-    hostelId: 0, roomNumber: "", floor: 0, wing: "", capacity: 2, roomType: "double"
+    hostelId: 0,
+    roomNumber: "",
+    floor: 0,
+    wing: "",
+    capacity: 2,
+    roomType: "double",
   });
   const [bulkRoomForm, setBulkRoomForm] = useState({
-    hostelId: 0, wing: "", floor: 0, startRoomNumber: 101, count: 10, capacity: 2, roomType: "double"
+    hostelId: 0,
+    wing: "",
+    floor: 0,
+    startRoomNumber: 101,
+    count: 10,
+    capacity: 2,
+    roomType: "double",
   });
   const [ruleForm, setRuleForm] = useState({
-    hostelId: null as number | null, year: null as number | null,
-    roomType: "", isAllowed: true, priority: 0, description: ""
+    hostelId: null as number | null,
+    year: null as number | null,
+    roomType: "",
+    isAllowed: true,
+    priority: 0,
+    description: "",
   });
 
   // Scheduling
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
+
+  // Allocation mode
+  const [allocationMode, setAllocationMode] = useState<"group_based" | "fcfs">(
+    "group_based",
+  );
 
   useEffect(() => {
     checkAuth();
@@ -129,13 +175,24 @@ export default function AdminPage() {
     setIsLoading(true);
     setError("");
     try {
-      const [statsRes, hostelsRes, roomsRes, rulesRes, runsRes, studentsRes] = await Promise.all([
+      const [
+        statsRes,
+        hostelsRes,
+        roomsRes,
+        rulesRes,
+        runsRes,
+        studentsRes,
+        swapsRes,
+        cyclesRes,
+      ] = await Promise.all([
         adminApi.getDashboardStats(),
         adminApi.getAllHostels(),
         adminApi.getAllRooms(),
         adminApi.getAllRules(),
         adminApi.getAllocationRuns(),
         studentsApi.getAll().catch(() => ({ data: [] })),
+        swapsApi.getAll().catch(() => ({ data: [] })),
+        swapsApi.detectCycles().catch(() => ({ data: [] })),
       ]);
       setStats(statsRes.data);
       setHostels(hostelsRes.data);
@@ -143,6 +200,8 @@ export default function AdminPage() {
       setRules(rulesRes.data);
       setAllocationRuns(runsRes.data);
       setStudents(studentsRes.data || []);
+      setSwapRequests(swapsRes.data || []);
+      setSwapChains(cyclesRes.data || []);
     } catch (err: any) {
       if (err.response?.status !== 401) {
         setError("Failed to load data. Make sure the backend is running.");
@@ -155,7 +214,8 @@ export default function AdminPage() {
   // CRUD handlers for Hostels
   const handleCreateHostel = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(""); setSuccess("");
+    setError("");
+    setSuccess("");
     try {
       await adminApi.createHostel(hostelForm);
       setSuccess("Hostel created successfully");
@@ -181,12 +241,20 @@ export default function AdminPage() {
   // CRUD handlers for Rooms
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(""); setSuccess("");
+    setError("");
+    setSuccess("");
     try {
       await adminApi.createRoom(roomForm);
       setSuccess("Room created successfully");
       setShowRoomForm(false);
-      setRoomForm({ hostelId: 0, roomNumber: "", floor: 0, wing: "", capacity: 2, roomType: "double" });
+      setRoomForm({
+        hostelId: 0,
+        roomNumber: "",
+        floor: 0,
+        wing: "",
+        capacity: 2,
+        roomType: "double",
+      });
       loadAllData();
     } catch (err: any) {
       setError(err.response?.data?.message || "Failed to create room");
@@ -195,7 +263,8 @@ export default function AdminPage() {
 
   const handleBulkCreateRooms = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(""); setSuccess("");
+    setError("");
+    setSuccess("");
     try {
       await adminApi.bulkCreateRooms(bulkRoomForm);
       setSuccess(`Created ${bulkRoomForm.count} rooms successfully`);
@@ -219,7 +288,8 @@ export default function AdminPage() {
   // CRUD handlers for Rules
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(""); setSuccess("");
+    setError("");
+    setSuccess("");
     try {
       await adminApi.createRule({
         ...ruleForm,
@@ -229,7 +299,14 @@ export default function AdminPage() {
       });
       setSuccess("Rule created successfully");
       setShowRuleForm(false);
-      setRuleForm({ hostelId: null, year: null, roomType: "", isAllowed: true, priority: 0, description: "" });
+      setRuleForm({
+        hostelId: null,
+        year: null,
+        roomType: "",
+        isAllowed: true,
+        priority: 0,
+        description: "",
+      });
       loadAllData();
     } catch (err: any) {
       setError(err.response?.data?.message || "Failed to create rule");
@@ -254,7 +331,8 @@ export default function AdminPage() {
 
   const handleSaveStudent = async () => {
     if (!editingStudentId) return;
-    setError(""); setSuccess("");
+    setError("");
+    setSuccess("");
     try {
       // Call API to update student
       await studentsApi.update(editingStudentId, editedStudent);
@@ -274,10 +352,16 @@ export default function AdminPage() {
 
   // Allocation
   const handleRunAllocation = async () => {
-    if (!confirm("Run allocation now? This will allocate students to rooms based on current rules.")) return;
-    setError(""); setSuccess("");
+    if (
+      !confirm(
+        "Run allocation now? This will allocate students to rooms based on current rules.",
+      )
+    )
+      return;
+    setError("");
+    setSuccess("");
     try {
-      const res = await adminApi.triggerAllocation();
+      const res = await adminApi.triggerAllocation({ allocationMode });
       setSuccess("Allocation started! Polling for results...");
       loadAllData();
       pollAllocationStatus(res.data.id);
@@ -296,7 +380,9 @@ export default function AdminPage() {
           setAllocationResults(resultsRes.data || []);
           loadAllData();
         } else if (res.data.status === "failed") {
-          setError("Allocation failed: " + (res.data.errorMessage || "Unknown error"));
+          setError(
+            "Allocation failed: " + (res.data.errorMessage || "Unknown error"),
+          );
           loadAllData();
         } else {
           setTimeout(checkStatus, 3000);
@@ -309,8 +395,12 @@ export default function AdminPage() {
   };
 
   const handleApproveAllocation = async (runId: string) => {
-    if (!confirm("Approve this allocation? Room assignments will be finalized.")) return;
-    setError(""); setSuccess("");
+    if (
+      !confirm("Approve this allocation? Room assignments will be finalized.")
+    )
+      return;
+    setError("");
+    setSuccess("");
     try {
       // In a real implementation, this would call an endpoint to finalize
       setSuccess("Allocation approved and saved to database!");
@@ -334,7 +424,7 @@ export default function AdminPage() {
   }
 
   const filteredRooms = selectedHostelFilter
-    ? rooms.filter(r => r.hostelId === selectedHostelFilter)
+    ? rooms.filter((r) => r.hostelId === selectedHostelFilter)
     : rooms;
 
   const sidebarItems = [
@@ -343,6 +433,14 @@ export default function AdminPage() {
     { id: "rules", label: "Rules", icon: Settings, count: rules.length },
     { id: "students", label: "Students", icon: Users, count: students.length },
     { id: "allocation", label: "Allocation", icon: Play },
+    {
+      id: "swaps",
+      label: "Room Swaps",
+      icon: ArrowLeftRight,
+      count: swapRequests.filter(
+        (s) => s.status === "pending" || s.status === "accepted",
+      ).length,
+    },
   ];
 
   return (
@@ -370,9 +468,13 @@ export default function AdminPage() {
                 <span>{item.label}</span>
               </div>
               {item.count !== undefined && (
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  activeSection === item.id ? "bg-indigo-200 text-indigo-800" : "bg-gray-100 text-gray-600"
-                }`}>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${
+                    activeSection === item.id
+                      ? "bg-indigo-200 text-indigo-800"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
                   {item.count}
                 </span>
               )}
@@ -410,14 +512,18 @@ export default function AdminPage() {
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
               <XCircle className="w-5 h-5 shrink-0" />
               <span className="flex-1">{error}</span>
-              <button onClick={() => setError("")}><X className="w-4 h-4" /></button>
+              <button onClick={() => setError("")}>
+                <X className="w-4 h-4" />
+              </button>
             </div>
           )}
           {success && (
             <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-center gap-3 text-green-700">
               <CheckCircle className="w-5 h-5 shrink-0" />
               <span className="flex-1">{success}</span>
-              <button onClick={() => setSuccess("")}><X className="w-4 h-4" /></button>
+              <button onClick={() => setSuccess("")}>
+                <X className="w-4 h-4" />
+              </button>
             </div>
           )}
 
@@ -438,22 +544,39 @@ export default function AdminPage() {
               {showHostelForm && (
                 <Card>
                   <CardContent className="pt-6">
-                    <form onSubmit={handleCreateHostel} className="flex gap-4 items-end flex-wrap">
+                    <form
+                      onSubmit={handleCreateHostel}
+                      className="flex gap-4 items-end flex-wrap"
+                    >
                       <div className="flex-1 min-w-50">
-                        <label className="block text-sm font-medium mb-1">Hostel Name</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Hostel Name
+                        </label>
                         <Input
                           placeholder="e.g., BH-1, GH-1"
                           value={hostelForm.name}
-                          onChange={(e) => setHostelForm({ ...hostelForm, name: e.target.value })}
+                          onChange={(e) =>
+                            setHostelForm({
+                              ...hostelForm,
+                              name: e.target.value,
+                            })
+                          }
                           required
                         />
                       </div>
                       <div className="w-40">
-                        <label className="block text-sm font-medium mb-1">Gender Type</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Gender Type
+                        </label>
                         <select
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                           value={hostelForm.genderType}
-                          onChange={(e) => setHostelForm({ ...hostelForm, genderType: e.target.value })}
+                          onChange={(e) =>
+                            setHostelForm({
+                              ...hostelForm,
+                              genderType: e.target.value,
+                            })
+                          }
                         >
                           <option value="male">Male</option>
                           <option value="female">Female</option>
@@ -461,7 +584,13 @@ export default function AdminPage() {
                         </select>
                       </div>
                       <Button type="submit">Create</Button>
-                      <Button type="button" variant="outline" onClick={() => setShowHostelForm(false)}>Cancel</Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowHostelForm(false)}
+                      >
+                        Cancel
+                      </Button>
                     </form>
                   </CardContent>
                 </Card>
@@ -469,20 +598,33 @@ export default function AdminPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {hostels.map((hostel) => (
-                  <Card key={hostel.id} className="hover:shadow-md transition-shadow">
+                  <Card
+                    key={hostel.id}
+                    className="hover:shadow-md transition-shadow"
+                  >
                     <CardContent className="pt-6">
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="text-lg font-semibold">{hostel.name}</h3>
-                          <span className={`inline-block mt-1 px-2 py-0.5 text-xs rounded-full ${
-                            hostel.genderType === "male" ? "bg-blue-100 text-blue-700" :
-                            hostel.genderType === "female" ? "bg-pink-100 text-pink-700" :
-                            "bg-purple-100 text-purple-700"
-                          }`}>
+                          <h3 className="text-lg font-semibold">
+                            {hostel.name}
+                          </h3>
+                          <span
+                            className={`inline-block mt-1 px-2 py-0.5 text-xs rounded-full ${
+                              hostel.genderType === "male"
+                                ? "bg-blue-100 text-blue-700"
+                                : hostel.genderType === "female"
+                                  ? "bg-pink-100 text-pink-700"
+                                  : "bg-purple-100 text-purple-700"
+                            }`}
+                          >
                             {hostel.genderType}
                           </span>
                           <p className="text-sm text-gray-500 mt-2">
-                            {rooms.filter(r => r.hostelId === hostel.id).length} rooms
+                            {
+                              rooms.filter((r) => r.hostelId === hostel.id)
+                                .length
+                            }{" "}
+                            rooms
                           </p>
                         </div>
                         <button
@@ -514,7 +656,10 @@ export default function AdminPage() {
                   <p className="text-gray-500">Manage room inventory</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => setShowBulkRoomForm(!showBulkRoomForm)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowBulkRoomForm(!showBulkRoomForm)}
+                  >
                     <Plus className="w-4 h-4 mr-2" />
                     Bulk Add
                   </Button>
@@ -527,15 +672,23 @@ export default function AdminPage() {
 
               {/* Filter */}
               <div className="flex items-center gap-4 bg-white p-4 rounded-lg border">
-                <label className="text-sm font-medium text-gray-700">Filter by Hostel:</label>
+                <label className="text-sm font-medium text-gray-700">
+                  Filter by Hostel:
+                </label>
                 <select
                   className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={selectedHostelFilter || ""}
-                  onChange={(e) => setSelectedHostelFilter(e.target.value ? Number(e.target.value) : null)}
+                  onChange={(e) =>
+                    setSelectedHostelFilter(
+                      e.target.value ? Number(e.target.value) : null,
+                    )
+                  }
                 >
                   <option value="">All Hostels</option>
                   {hostels.map((h) => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
                   ))}
                 </select>
                 <span className="text-sm text-gray-500">
@@ -549,58 +702,101 @@ export default function AdminPage() {
                     <CardTitle className="text-base">Add Single Room</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <form onSubmit={handleCreateRoom} className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <form
+                      onSubmit={handleCreateRoom}
+                      className="grid grid-cols-2 md:grid-cols-4 gap-4"
+                    >
                       <div>
-                        <label className="block text-sm font-medium mb-1">Hostel *</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Hostel *
+                        </label>
                         <select
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                           value={roomForm.hostelId}
-                          onChange={(e) => setRoomForm({ ...roomForm, hostelId: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setRoomForm({
+                              ...roomForm,
+                              hostelId: Number(e.target.value),
+                            })
+                          }
                           required
                         >
                           <option value={0}>Select Hostel</option>
                           {hostels.map((h) => (
-                            <option key={h.id} value={h.id}>{h.name}</option>
+                            <option key={h.id} value={h.id}>
+                              {h.name}
+                            </option>
                           ))}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Room Number *</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Room Number *
+                        </label>
                         <Input
                           placeholder="e.g., 101"
                           value={roomForm.roomNumber}
-                          onChange={(e) => setRoomForm({ ...roomForm, roomNumber: e.target.value })}
+                          onChange={(e) =>
+                            setRoomForm({
+                              ...roomForm,
+                              roomNumber: e.target.value,
+                            })
+                          }
                           required
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Wing</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Wing
+                        </label>
                         <Input
                           placeholder="e.g., A, B"
                           value={roomForm.wing}
-                          onChange={(e) => setRoomForm({ ...roomForm, wing: e.target.value })}
+                          onChange={(e) =>
+                            setRoomForm({ ...roomForm, wing: e.target.value })
+                          }
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Floor</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Floor
+                        </label>
                         <Input
                           type="number"
                           value={roomForm.floor}
-                          onChange={(e) => setRoomForm({ ...roomForm, floor: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setRoomForm({
+                              ...roomForm,
+                              floor: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Capacity</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Capacity
+                        </label>
                         <Input
                           type="number"
                           min={1}
                           value={roomForm.capacity}
-                          onChange={(e) => setRoomForm({ ...roomForm, capacity: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setRoomForm({
+                              ...roomForm,
+                              capacity: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div className="col-span-2 flex items-end gap-2">
                         <Button type="submit">Create Room</Button>
-                        <Button type="button" variant="outline" onClick={() => setShowRoomForm(false)}>Cancel</Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowRoomForm(false)}
+                        >
+                          Cancel
+                        </Button>
                       </div>
                     </form>
                   </CardContent>
@@ -610,70 +806,129 @@ export default function AdminPage() {
               {showBulkRoomForm && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Bulk Create Rooms</CardTitle>
-                    <CardDescription>Create multiple rooms at once</CardDescription>
+                    <CardTitle className="text-base">
+                      Bulk Create Rooms
+                    </CardTitle>
+                    <CardDescription>
+                      Create multiple rooms at once
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <form onSubmit={handleBulkCreateRooms} className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <form
+                      onSubmit={handleBulkCreateRooms}
+                      className="grid grid-cols-2 md:grid-cols-4 gap-4"
+                    >
                       <div>
-                        <label className="block text-sm font-medium mb-1">Hostel *</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Hostel *
+                        </label>
                         <select
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                           value={bulkRoomForm.hostelId}
-                          onChange={(e) => setBulkRoomForm({ ...bulkRoomForm, hostelId: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setBulkRoomForm({
+                              ...bulkRoomForm,
+                              hostelId: Number(e.target.value),
+                            })
+                          }
                           required
                         >
                           <option value={0}>Select Hostel</option>
                           {hostels.map((h) => (
-                            <option key={h.id} value={h.id}>{h.name}</option>
+                            <option key={h.id} value={h.id}>
+                              {h.name}
+                            </option>
                           ))}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Wing</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Wing
+                        </label>
                         <Input
                           placeholder="e.g., A"
                           value={bulkRoomForm.wing}
-                          onChange={(e) => setBulkRoomForm({ ...bulkRoomForm, wing: e.target.value })}
+                          onChange={(e) =>
+                            setBulkRoomForm({
+                              ...bulkRoomForm,
+                              wing: e.target.value,
+                            })
+                          }
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Floor</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Floor
+                        </label>
                         <Input
                           type="number"
                           value={bulkRoomForm.floor}
-                          onChange={(e) => setBulkRoomForm({ ...bulkRoomForm, floor: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setBulkRoomForm({
+                              ...bulkRoomForm,
+                              floor: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Start Room #</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Start Room #
+                        </label>
                         <Input
                           type="number"
                           value={bulkRoomForm.startRoomNumber}
-                          onChange={(e) => setBulkRoomForm({ ...bulkRoomForm, startRoomNumber: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setBulkRoomForm({
+                              ...bulkRoomForm,
+                              startRoomNumber: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Number of Rooms</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Number of Rooms
+                        </label>
                         <Input
                           type="number"
                           min={1}
                           value={bulkRoomForm.count}
-                          onChange={(e) => setBulkRoomForm({ ...bulkRoomForm, count: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setBulkRoomForm({
+                              ...bulkRoomForm,
+                              count: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Capacity Each</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Capacity Each
+                        </label>
                         <Input
                           type="number"
                           min={1}
                           value={bulkRoomForm.capacity}
-                          onChange={(e) => setBulkRoomForm({ ...bulkRoomForm, capacity: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setBulkRoomForm({
+                              ...bulkRoomForm,
+                              capacity: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div className="col-span-2 flex items-end gap-2">
-                        <Button type="submit">Create {bulkRoomForm.count} Rooms</Button>
-                        <Button type="button" variant="outline" onClick={() => setShowBulkRoomForm(false)}>Cancel</Button>
+                        <Button type="submit">
+                          Create {bulkRoomForm.count} Rooms
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowBulkRoomForm(false)}
+                        >
+                          Cancel
+                        </Button>
                       </div>
                     </form>
                   </CardContent>
@@ -687,27 +942,48 @@ export default function AdminPage() {
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b">
                         <tr>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Room #</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Hostel</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Wing</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Floor</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Capacity</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Status</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Room #
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Hostel
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Wing
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Floor
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Capacity
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Status
+                          </th>
                           <th className="px-4 py-3 text-left text-sm font-medium text-gray-500"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {filteredRooms.slice(0, 50).map((room) => (
                           <tr key={room.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium">{room.roomNumber}</td>
-                            <td className="px-4 py-3">{hostels.find(h => h.id === room.hostelId)?.name || "-"}</td>
+                            <td className="px-4 py-3 font-medium">
+                              {room.roomNumber}
+                            </td>
+                            <td className="px-4 py-3">
+                              {hostels.find((h) => h.id === room.hostelId)
+                                ?.name || "-"}
+                            </td>
                             <td className="px-4 py-3">{room.wing || "-"}</td>
                             <td className="px-4 py-3">{room.floor ?? "-"}</td>
                             <td className="px-4 py-3">{room.capacity}</td>
                             <td className="px-4 py-3">
-                              <span className={`px-2 py-1 text-xs rounded-full ${
-                                room.status === "available" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                              }`}>
+                              <span
+                                className={`px-2 py-1 text-xs rounded-full ${
+                                  room.status === "available"
+                                    ? "bg-green-100 text-green-700"
+                                    : "bg-yellow-100 text-yellow-700"
+                                }`}
+                              >
                                 {room.status}
                               </span>
                             </td>
@@ -745,8 +1021,12 @@ export default function AdminPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Allocation Rules</h2>
-                  <p className="text-gray-500">Configure allocation constraints</p>
+                  <h2 className="text-2xl font-bold text-gray-900">
+                    Allocation Rules
+                  </h2>
+                  <p className="text-gray-500">
+                    Configure allocation constraints
+                  </p>
                 </div>
                 <Button onClick={() => setShowRuleForm(!showRuleForm)}>
                   <Plus className="w-4 h-4 mr-2" />
@@ -758,29 +1038,54 @@ export default function AdminPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">Create Rule</CardTitle>
-                    <CardDescription>Define who can be allocated where</CardDescription>
+                    <CardDescription>
+                      Define who can be allocated where
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <form onSubmit={handleCreateRule} className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <form
+                      onSubmit={handleCreateRule}
+                      className="grid grid-cols-2 md:grid-cols-3 gap-4"
+                    >
                       <div>
-                        <label className="block text-sm font-medium mb-1">Hostel (optional)</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Hostel (optional)
+                        </label>
                         <select
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                           value={ruleForm.hostelId || ""}
-                          onChange={(e) => setRuleForm({ ...ruleForm, hostelId: e.target.value ? Number(e.target.value) : null })}
+                          onChange={(e) =>
+                            setRuleForm({
+                              ...ruleForm,
+                              hostelId: e.target.value
+                                ? Number(e.target.value)
+                                : null,
+                            })
+                          }
                         >
                           <option value="">All Hostels</option>
                           {hostels.map((h) => (
-                            <option key={h.id} value={h.id}>{h.name}</option>
+                            <option key={h.id} value={h.id}>
+                              {h.name}
+                            </option>
                           ))}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Year (optional)</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Year (optional)
+                        </label>
                         <select
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                           value={ruleForm.year || ""}
-                          onChange={(e) => setRuleForm({ ...ruleForm, year: e.target.value ? Number(e.target.value) : null })}
+                          onChange={(e) =>
+                            setRuleForm({
+                              ...ruleForm,
+                              year: e.target.value
+                                ? Number(e.target.value)
+                                : null,
+                            })
+                          }
                         >
                           <option value="">All Years</option>
                           <option value={1}>1st Year</option>
@@ -790,35 +1095,62 @@ export default function AdminPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Action</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Action
+                        </label>
                         <select
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                           value={ruleForm.isAllowed ? "allow" : "deny"}
-                          onChange={(e) => setRuleForm({ ...ruleForm, isAllowed: e.target.value === "allow" })}
+                          onChange={(e) =>
+                            setRuleForm({
+                              ...ruleForm,
+                              isAllowed: e.target.value === "allow",
+                            })
+                          }
                         >
                           <option value="allow">Allow</option>
                           <option value="deny">Deny</option>
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1">Priority (higher = more important)</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Priority (higher = more important)
+                        </label>
                         <Input
                           type="number"
                           value={ruleForm.priority}
-                          onChange={(e) => setRuleForm({ ...ruleForm, priority: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setRuleForm({
+                              ...ruleForm,
+                              priority: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div className="col-span-2">
-                        <label className="block text-sm font-medium mb-1">Description</label>
+                        <label className="block text-sm font-medium mb-1">
+                          Description
+                        </label>
                         <Input
                           placeholder="e.g., 1st year students go to BH-1"
                           value={ruleForm.description}
-                          onChange={(e) => setRuleForm({ ...ruleForm, description: e.target.value })}
+                          onChange={(e) =>
+                            setRuleForm({
+                              ...ruleForm,
+                              description: e.target.value,
+                            })
+                          }
                         />
                       </div>
                       <div className="col-span-full flex gap-2">
                         <Button type="submit">Create Rule</Button>
-                        <Button type="button" variant="outline" onClick={() => setShowRuleForm(false)}>Cancel</Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowRuleForm(false)}
+                        >
+                          Cancel
+                        </Button>
                       </div>
                     </form>
                   </CardContent>
@@ -830,12 +1162,21 @@ export default function AdminPage() {
                   <Card key={rule.id}>
                     <CardContent className="py-4 flex items-center justify-between">
                       <div className="flex items-center gap-4">
-                        <div className={`w-3 h-3 rounded-full ${rule.isAllowed ? "bg-green-500" : "bg-red-500"}`} />
+                        <div
+                          className={`w-3 h-3 rounded-full ${rule.isAllowed ? "bg-green-500" : "bg-red-500"}`}
+                        />
                         <div>
-                          <p className="font-medium">{rule.description || `Rule #${rule.id}`}</p>
+                          <p className="font-medium">
+                            {rule.description || `Rule #${rule.id}`}
+                          </p>
                           <p className="text-sm text-gray-500">
-                            {rule.hostelId ? hostels.find(h => h.id === rule.hostelId)?.name : "All Hostels"}
-                            {rule.year ? ` | Year ${rule.year}` : " | All Years"}
+                            {rule.hostelId
+                              ? hostels.find((h) => h.id === rule.hostelId)
+                                  ?.name
+                              : "All Hostels"}
+                            {rule.year
+                              ? ` | Year ${rule.year}`
+                              : " | All Years"}
                             {` | Priority: ${rule.priority}`}
                           </p>
                         </div>
@@ -852,7 +1193,10 @@ export default function AdminPage() {
                 {rules.length === 0 && (
                   <div className="text-center py-12 text-gray-500 bg-white rounded-lg border border-dashed">
                     <Settings className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>No rules defined. Click "Add Rule" to create allocation constraints.</p>
+                    <p>
+                      No rules defined. Click "Add Rule" to create allocation
+                      constraints.
+                    </p>
                   </div>
                 )}
               </div>
@@ -865,7 +1209,9 @@ export default function AdminPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Students</h2>
-                  <p className="text-gray-500">View and edit student information</p>
+                  <p className="text-gray-500">
+                    View and edit student information
+                  </p>
                 </div>
               </div>
 
@@ -875,12 +1221,24 @@ export default function AdminPage() {
                     <table className="w-full">
                       <thead className="bg-gray-50 border-b">
                         <tr>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Roll Number</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Name</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Year</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Program</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Gender</th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Actions</th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Roll Number
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Name
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Year
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Program
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Gender
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Actions
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -891,14 +1249,24 @@ export default function AdminPage() {
                                 <td className="px-4 py-2">
                                   <Input
                                     value={editedStudent.rollNumber || ""}
-                                    onChange={(e) => setEditedStudent({ ...editedStudent, rollNumber: e.target.value })}
+                                    onChange={(e) =>
+                                      setEditedStudent({
+                                        ...editedStudent,
+                                        rollNumber: e.target.value,
+                                      })
+                                    }
                                     className="h-8 text-sm"
                                   />
                                 </td>
                                 <td className="px-4 py-2">
                                   <Input
                                     value={editedStudent.fullName || ""}
-                                    onChange={(e) => setEditedStudent({ ...editedStudent, fullName: e.target.value })}
+                                    onChange={(e) =>
+                                      setEditedStudent({
+                                        ...editedStudent,
+                                        fullName: e.target.value,
+                                      })
+                                    }
                                     className="h-8 text-sm"
                                   />
                                 </td>
@@ -906,28 +1274,49 @@ export default function AdminPage() {
                                   <select
                                     className="w-full px-2 py-1 border rounded text-sm"
                                     value={editedStudent.year || 1}
-                                    onChange={(e) => setEditedStudent({ ...editedStudent, year: Number(e.target.value) })}
+                                    onChange={(e) =>
+                                      setEditedStudent({
+                                        ...editedStudent,
+                                        year: Number(e.target.value),
+                                      })
+                                    }
                                   >
-                                    {[1, 2, 3, 4].map(y => <option key={y} value={y}>{y}</option>)}
+                                    {[1, 2, 3, 4].map((y) => (
+                                      <option key={y} value={y}>
+                                        {y}
+                                      </option>
+                                    ))}
                                   </select>
                                 </td>
                                 <td className="px-4 py-2">
                                   <select
                                     className="w-full px-2 py-1 border rounded text-sm"
                                     value={editedStudent.program || ""}
-                                    onChange={(e) => setEditedStudent({ ...editedStudent, program: e.target.value })}
+                                    onChange={(e) =>
+                                      setEditedStudent({
+                                        ...editedStudent,
+                                        program: e.target.value,
+                                      })
+                                    }
                                   >
                                     <option value="BTech CSE">BTech CSE</option>
                                     <option value="BTech ECE">BTech ECE</option>
                                     <option value="BTech CCE">BTech CCE</option>
-                                    <option value="BTech Mechanical">BTech Mechanical</option>
+                                    <option value="BTech Mechanical">
+                                      BTech Mechanical
+                                    </option>
                                   </select>
                                 </td>
                                 <td className="px-4 py-2">
                                   <select
                                     className="w-full px-2 py-1 border rounded text-sm"
                                     value={editedStudent.gender || "male"}
-                                    onChange={(e) => setEditedStudent({ ...editedStudent, gender: e.target.value })}
+                                    onChange={(e) =>
+                                      setEditedStudent({
+                                        ...editedStudent,
+                                        gender: e.target.value,
+                                      })
+                                    }
                                   >
                                     <option value="male">Male</option>
                                     <option value="female">Female</option>
@@ -935,10 +1324,16 @@ export default function AdminPage() {
                                 </td>
                                 <td className="px-4 py-2">
                                   <div className="flex gap-1">
-                                    <button onClick={handleSaveStudent} className="text-green-600 hover:bg-green-50 p-1 rounded">
+                                    <button
+                                      onClick={handleSaveStudent}
+                                      className="text-green-600 hover:bg-green-50 p-1 rounded"
+                                    >
                                       <Save className="w-4 h-4" />
                                     </button>
-                                    <button onClick={handleCancelEdit} className="text-gray-500 hover:bg-gray-100 p-1 rounded">
+                                    <button
+                                      onClick={handleCancelEdit}
+                                      className="text-gray-500 hover:bg-gray-100 p-1 rounded"
+                                    >
                                       <X className="w-4 h-4" />
                                     </button>
                                   </div>
@@ -946,14 +1341,22 @@ export default function AdminPage() {
                               </>
                             ) : (
                               <>
-                                <td className="px-4 py-3 font-medium">{student.rollNumber}</td>
-                                <td className="px-4 py-3">{student.fullName}</td>
+                                <td className="px-4 py-3 font-medium">
+                                  {student.rollNumber}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {student.fullName}
+                                </td>
                                 <td className="px-4 py-3">{student.year}</td>
                                 <td className="px-4 py-3">{student.program}</td>
                                 <td className="px-4 py-3">
-                                  <span className={`px-2 py-1 text-xs rounded-full ${
-                                    student.gender === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"
-                                  }`}>
+                                  <span
+                                    className={`px-2 py-1 text-xs rounded-full ${
+                                      student.gender === "male"
+                                        ? "bg-blue-100 text-blue-700"
+                                        : "bg-pink-100 text-pink-700"
+                                    }`}
+                                  >
                                     {student.gender}
                                   </span>
                                 </td>
@@ -988,8 +1391,12 @@ export default function AdminPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Allocation</h2>
-                  <p className="text-gray-500">Run and manage room allocations</p>
+                  <h2 className="text-2xl font-bold text-gray-900">
+                    Allocation
+                  </h2>
+                  <p className="text-gray-500">
+                    Run and manage room allocations
+                  </p>
                 </div>
               </div>
 
@@ -1009,19 +1416,29 @@ export default function AdminPage() {
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
                     <div>
                       <p className="text-sm text-gray-500">Total Students</p>
-                      <p className="text-2xl font-bold text-gray-900">{stats?.totalStudents || 0}</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {stats?.totalStudents || 0}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-sm text-gray-500">Students in Groups</p>
-                      <p className="text-2xl font-bold text-gray-900">{stats?.studentsInGroups || 0}</p>
+                      <p className="text-sm text-gray-500">
+                        Students in Groups
+                      </p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {stats?.studentsInGroups || 0}
+                      </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500">Available Beds</p>
-                      <p className="text-2xl font-bold text-gray-900">{stats?.totalBeds || 0}</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {stats?.totalBeds || 0}
+                      </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500">Active Rules</p>
-                      <p className="text-2xl font-bold text-gray-900">{stats?.totalRules || 0}</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {stats?.totalRules || 0}
+                      </p>
                     </div>
                   </div>
 
@@ -1033,7 +1450,9 @@ export default function AdminPage() {
                     </h4>
                     <div className="flex items-end gap-4 flex-wrap">
                       <div>
-                        <label className="block text-sm font-medium mb-1 text-gray-600">Date</label>
+                        <label className="block text-sm font-medium mb-1 text-gray-600">
+                          Date
+                        </label>
                         <Input
                           type="date"
                           value={scheduleDate}
@@ -1042,7 +1461,9 @@ export default function AdminPage() {
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium mb-1 text-gray-600">Time</label>
+                        <label className="block text-sm font-medium mb-1 text-gray-600">
+                          Time
+                        </label>
                         <Input
                           type="time"
                           value={scheduleTime}
@@ -1050,15 +1471,48 @@ export default function AdminPage() {
                           className="w-32"
                         />
                       </div>
-                      <Button variant="outline" disabled={!scheduleDate || !scheduleTime}>
+                      <Button
+                        variant="outline"
+                        disabled={!scheduleDate || !scheduleTime}
+                      >
                         <Clock className="w-4 h-4 mr-2" />
                         Schedule
                       </Button>
                     </div>
                   </div>
 
+                  {/* Allocation Mode Selector */}
+                  <div className="p-4 border rounded-lg bg-white">
+                    <h4 className="font-medium mb-3">Allocation Mode</h4>
+                    <select
+                      value={allocationMode}
+                      onChange={(e) =>
+                        setAllocationMode(
+                          e.target.value as "group_based" | "fcfs",
+                        )
+                      }
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="group_based">
+                        Group-Based Optimization (Default)
+                      </option>
+                      <option value="fcfs">
+                        First-Come-First-Serve (FCFS)
+                      </option>
+                    </select>
+                    <p className="text-sm text-gray-600 mt-2">
+                      {allocationMode === "fcfs"
+                        ? "⏱️ Students will be allocated strictly by application timestamp, ignoring group preferences."
+                        : "👥 Groups will be optimized for proximity and cohesion. Students allocated together when possible."}
+                    </p>
+                  </div>
+
                   {/* Run Now Button */}
-                  <Button onClick={handleRunAllocation} className="w-full" size="lg">
+                  <Button
+                    onClick={handleRunAllocation}
+                    className="w-full"
+                    size="lg"
+                  >
                     <Play className="w-5 h-5 mr-2" />
                     Run Allocation Now
                   </Button>
@@ -1079,12 +1533,22 @@ export default function AdminPage() {
                         className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
                       >
                         <div className="flex items-center gap-4">
-                          {run.status === "completed" && <CheckCircle className="w-6 h-6 text-green-500" />}
-                          {run.status === "running" && <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />}
-                          {run.status === "failed" && <XCircle className="w-6 h-6 text-red-500" />}
-                          {run.status === "queued" && <Clock className="w-6 h-6 text-yellow-500" />}
+                          {run.status === "completed" && (
+                            <CheckCircle className="w-6 h-6 text-green-500" />
+                          )}
+                          {run.status === "running" && (
+                            <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                          )}
+                          {run.status === "failed" && (
+                            <XCircle className="w-6 h-6 text-red-500" />
+                          )}
+                          {run.status === "queued" && (
+                            <Clock className="w-6 h-6 text-yellow-500" />
+                          )}
                           <div>
-                            <p className="font-medium">Run #{run.id.slice(0, 8)}</p>
+                            <p className="font-medium">
+                              Run #{run.id.slice(0, 8)}
+                            </p>
                             <p className="text-sm text-gray-500">
                               {new Date(run.startTime).toLocaleString()}
                             </p>
@@ -1094,7 +1558,8 @@ export default function AdminPage() {
                           {run.status === "completed" && (
                             <>
                               <span className="text-sm text-gray-600">
-                                {run.allocatedStudents}/{run.totalStudents} allocated
+                                {run.allocatedStudents}/{run.totalStudents}{" "}
+                                allocated
                               </span>
                               <Button
                                 variant="outline"
@@ -1106,12 +1571,17 @@ export default function AdminPage() {
                               </Button>
                             </>
                           )}
-                          <span className={`px-3 py-1 text-xs font-medium rounded-full ${
-                            run.status === "completed" ? "bg-green-100 text-green-700" :
-                            run.status === "running" ? "bg-blue-100 text-blue-700" :
-                            run.status === "failed" ? "bg-red-100 text-red-700" :
-                            "bg-yellow-100 text-yellow-700"
-                          }`}>
+                          <span
+                            className={`px-3 py-1 text-xs font-medium rounded-full ${
+                              run.status === "completed"
+                                ? "bg-green-100 text-green-700"
+                                : run.status === "running"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : run.status === "failed"
+                                    ? "bg-red-100 text-red-700"
+                                    : "bg-yellow-100 text-yellow-700"
+                            }`}
+                          >
                             {run.status}
                           </span>
                         </div>
@@ -1120,7 +1590,10 @@ export default function AdminPage() {
                     {allocationRuns.length === 0 && (
                       <div className="text-center py-12 text-gray-500">
                         <Play className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                        <p>No allocation runs yet. Click "Run Allocation Now" to start.</p>
+                        <p>
+                          No allocation runs yet. Click "Run Allocation Now" to
+                          start.
+                        </p>
                       </div>
                     )}
                   </div>
@@ -1135,39 +1608,60 @@ export default function AdminPage() {
                       <CheckCircle className="w-5 h-5 text-green-600" />
                       Allocation Results
                     </CardTitle>
-                    <CardDescription>Review student room assignments before approving</CardDescription>
+                    <CardDescription>
+                      Review student room assignments before approving
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="p-0">
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead className="bg-gray-50 border-b">
                           <tr>
-                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Student</th>
-                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Hostel</th>
-                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Room</th>
-                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Wing/Floor</th>
-                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Happiness</th>
+                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                              Student
+                            </th>
+                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                              Hostel
+                            </th>
+                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                              Room
+                            </th>
+                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                              Wing/Floor
+                            </th>
+                            <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                              Happiness
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
                           {allocationResults.slice(0, 30).map((result, idx) => (
                             <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 font-medium">{result.studentId}</td>
+                              <td className="px-4 py-3 font-medium">
+                                {result.studentId}
+                              </td>
                               <td className="px-4 py-3">{result.hostelName}</td>
                               <td className="px-4 py-3">{result.roomNumber}</td>
-                              <td className="px-4 py-3">{result.wing || "-"} / {result.floor ?? "-"}</td>
+                              <td className="px-4 py-3">
+                                {result.wing || "-"} / {result.floor ?? "-"}
+                              </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
                                     <div
                                       className={`h-full rounded-full transition-all ${
-                                        result.happiness >= 80 ? "bg-green-500" :
-                                        result.happiness >= 50 ? "bg-yellow-500" : "bg-red-500"
+                                        result.happiness >= 80
+                                          ? "bg-green-500"
+                                          : result.happiness >= 50
+                                            ? "bg-yellow-500"
+                                            : "bg-red-500"
                                       }`}
                                       style={{ width: `${result.happiness}%` }}
                                     />
                                   </div>
-                                  <span className="text-sm text-gray-600">{result.happiness}%</span>
+                                  <span className="text-sm text-gray-600">
+                                    {result.happiness}%
+                                  </span>
                                 </div>
                               </td>
                             </tr>
@@ -1183,6 +1677,331 @@ export default function AdminPage() {
                   </CardContent>
                 </Card>
               )}
+            </div>
+          )}
+
+          {/* SWAPS SECTION */}
+          {activeSection === "swaps" && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">
+                    Room Swaps
+                  </h2>
+                  <p className="text-gray-500">
+                    Manage student room swap requests
+                  </p>
+                </div>
+                <Button onClick={loadAllData} variant="outline">
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+
+              {/* Detected Swap Cycles */}
+              {swapChains.length > 0 && (
+                <Card className="border-indigo-200 bg-indigo-50">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-indigo-700">
+                      <ArrowLeftRight className="w-5 h-5" />
+                      Detected Swap Cycles ({swapChains.length})
+                    </CardTitle>
+                    <CardDescription>
+                      These swap chains can be executed together for optimal
+                      efficiency
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {swapChains.map((chain) => (
+                        <div
+                          key={chain.chainId}
+                          className="p-4 bg-white rounded-lg border"
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="font-medium text-indigo-700">
+                              Chain of {chain.participants.length} students
+                            </span>
+                            {chain.canExecute && (
+                              <Button
+                                size="sm"
+                                onClick={async () => {
+                                  try {
+                                    const requestIds = swapRequests
+                                      .filter((r) =>
+                                        chain.participants.some(
+                                          (p) => p.studentId === r.requesterId,
+                                        ),
+                                      )
+                                      .map((r) => r.id);
+                                    await swapsApi.executeChain(requestIds);
+                                    setSuccess(
+                                      "Swap chain executed successfully!",
+                                    );
+                                    loadAllData();
+                                  } catch (err: any) {
+                                    setError(
+                                      err.response?.data?.message ||
+                                        "Failed to execute chain",
+                                    );
+                                  }
+                                }}
+                              >
+                                Execute Chain
+                              </Button>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-sm">
+                            {chain.participants.map((p, i) => (
+                              <span
+                                key={p.studentId}
+                                className="flex items-center gap-1"
+                              >
+                                <span className="px-2 py-1 bg-gray-100 rounded">
+                                  {p.studentName}
+                                </span>
+                                {i < chain.participants.length - 1 && (
+                                  <ArrowLeftRight className="w-4 h-4 text-gray-400" />
+                                )}
+                              </span>
+                            ))}
+                            <ArrowLeftRight className="w-4 h-4 text-indigo-500" />
+                            <span className="text-indigo-600">(cycle)</span>
+                          </div>
+                          {chain.validationErrors &&
+                            chain.validationErrors.length > 0 && (
+                              <div className="mt-2 text-sm text-red-600">
+                                Errors: {chain.validationErrors.join(", ")}
+                              </div>
+                            )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Pending/Accepted Swap Requests */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Pending & Accepted Requests</CardTitle>
+                  <CardDescription>
+                    Swap requests awaiting admin action
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Requester
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Current Room
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Target Student
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Target Room
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {swapRequests
+                          .filter(
+                            (r) =>
+                              r.status === "pending" || r.status === "accepted",
+                          )
+                          .map((req) => (
+                            <tr key={req.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3">
+                                <div>
+                                  <p className="font-medium">
+                                    {req.requesterName}
+                                  </p>
+                                  <p className="text-sm text-gray-500">
+                                    {req.requesterRollNumber}
+                                  </p>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <p>{req.requesterRoom.roomNumber}</p>
+                                <p className="text-sm text-gray-500">
+                                  {req.requesterRoom.hostelName}
+                                </p>
+                              </td>
+                              <td className="px-4 py-3">
+                                {req.targetStudentName || (
+                                  <span className="text-gray-400">
+                                    Open Request
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {req.targetRoom ? (
+                                  <>
+                                    <p>{req.targetRoom.roomNumber}</p>
+                                    <p className="text-sm text-gray-500">
+                                      {req.targetRoom.hostelName}
+                                    </p>
+                                  </>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span
+                                  className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                    req.status === "accepted"
+                                      ? "bg-green-100 text-green-700"
+                                      : req.status === "pending"
+                                        ? "bg-yellow-100 text-yellow-700"
+                                        : "bg-gray-100 text-gray-700"
+                                  }`}
+                                >
+                                  {req.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                {req.status === "accepted" &&
+                                  req.targetStudentId && (
+                                    <Button
+                                      size="sm"
+                                      onClick={async () => {
+                                        try {
+                                          await swapsApi.executeDirect(req.id);
+                                          setSuccess(
+                                            "Swap executed successfully!",
+                                          );
+                                          loadAllData();
+                                        } catch (err: any) {
+                                          setError(
+                                            err.response?.data?.message ||
+                                              "Failed to execute swap",
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      <Check className="w-4 h-4 mr-1" />
+                                      Execute
+                                    </Button>
+                                  )}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                    {swapRequests.filter(
+                      (r) => r.status === "pending" || r.status === "accepted",
+                    ).length === 0 && (
+                      <div className="text-center py-12 text-gray-500">
+                        <ArrowLeftRight className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                        <p>No pending or accepted swap requests</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* All Swap Requests */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>All Swap Requests</CardTitle>
+                  <CardDescription>
+                    Complete history of swap requests
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            ID
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Requester
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Target
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Type
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                            Created
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {swapRequests.slice(0, 50).map((req) => (
+                          <tr key={req.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 font-mono text-sm">
+                              #{req.id}
+                            </td>
+                            <td className="px-4 py-3">{req.requesterName}</td>
+                            <td className="px-4 py-3">
+                              {req.targetStudentName || (
+                                <span className="text-gray-400">Open</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`px-2 py-1 text-xs rounded-full ${
+                                  req.swapType === "direct"
+                                    ? "bg-blue-100 text-blue-700"
+                                    : req.swapType === "chain"
+                                      ? "bg-purple-100 text-purple-700"
+                                      : "bg-gray-100 text-gray-700"
+                                }`}
+                              >
+                                {req.swapType}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                  req.status === "completed"
+                                    ? "bg-green-100 text-green-700"
+                                    : req.status === "accepted"
+                                      ? "bg-blue-100 text-blue-700"
+                                      : req.status === "pending"
+                                        ? "bg-yellow-100 text-yellow-700"
+                                        : req.status === "rejected"
+                                          ? "bg-red-100 text-red-700"
+                                          : "bg-gray-100 text-gray-700"
+                                }`}
+                              >
+                                {req.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-500">
+                              {new Date(req.createdAt).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {swapRequests.length === 0 && (
+                      <div className="text-center py-12 text-gray-500">
+                        <ArrowLeftRight className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                        <p>No swap requests yet</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>
