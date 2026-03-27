@@ -88,17 +88,44 @@ Allocation API at: http://localhost:8000
 
 ### For Students
 
-- Register and manage profile
-- Create groups with friends
-- Invite friends with consent-based approval
-- View allocation results
+- Register/login with JWT auth
+- Manage profile (roll number, year, gender, program)
+- Create one group and invite by roll number
+- Consent-based invitation flow (`pending`/`accepted`/`declined`)
+- View and respond to swap requests
 
-### For Wardens
+### For Wardens/Admin
 
-- Manage hostels, wings, and rooms
-- Configure allocation rules (year, room type restrictions)
-- Run allocation algorithm
-- Manual override capability
+- Manage hostels, wings, floors, and rooms
+- Bulk room creation for faster setup
+- Configure allocation rules (year, room type, priority, allow/deny)
+- Run allocation in two modes: `group_based` and `fcfs`
+- Review allocation history and per-run results
+- View swap cycles and execute chain swaps
+
+### Allocation Intelligence
+
+- Two-stage allocation (CSP + First-Fit Decreasing bin packing)
+- Gender-aware and rule-aware room eligibility filtering
+- Group split fallback with proximity scoring
+- Per-student happiness score in allocation results
+- Allocation decision audit trail (`availableRooms`, `constraintsApplied`, `alternativesConsidered`)
+
+## 📈 Current Delivery Status (March 2026)
+
+### MVP Scope Progress
+
+- Completed: core authentication, student profiles, consent-based groups, admin hostel/room/rules management, allocation engine integration, swaps, and frontend dashboards
+- Partially complete: allocation approval/finalization workflow (UI placeholder exists; no dedicated finalize endpoint yet)
+- Not started: notification microservice (email/SMS), RabbitMQ integration, Redis caching
+
+Estimated MVP completion: **~82% complete**, **~18% remaining**.
+
+### Full Roadmap Progress
+
+The long-term plan also includes Phase 2/3 modules (maintenance, communication hub, payments, inventory, AI analytics). These are not implemented yet.
+
+Estimated full roadmap completion: **~52% complete**, **~48% remaining**.
 
 ## 🧮 Allocation Algorithm
 

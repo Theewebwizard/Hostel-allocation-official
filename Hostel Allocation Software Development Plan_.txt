@@ -1,6 +1,63 @@
 ﻿
 Blueprint for an Intelligent Hostel Allocation System
 
+Implementation Addendum (March 27, 2026)
+
+Current delivery status against this plan:
+- MVP scope completion estimate: ~82% complete, ~18% remaining.
+- Full roadmap completion estimate (including future phases): ~52% complete, ~48% remaining.
+
+What is now implemented (high-level):
+- Core microservice split: NestJS core services, FastAPI allocation engine, React frontend.
+- Consent-based group formation flow with invitation statuses (pending/accepted/declined).
+- Admin cockpit APIs and UI for hostels, rooms, rules, and allocation runs.
+- Two allocation modes: group-based optimization and FCFS.
+- Decision transparency logs for each allocation decision.
+- Swaps module with direct/open/chain requests and admin chain execution.
+
+Items still pending from the plan:
+- Dedicated Notification Service (email/SMS/push).
+- RabbitMQ-based asynchronous orchestration.
+- Redis caching layer.
+- Full manual override/finalization workflow after allocation review.
+- Full multi-service containerization and CI/CD hardening.
+
+Features added beyond the original baseline plan:
+- Happiness scoring for allocation outcomes.
+- Detailed allocation decision audit trail.
+- Swap cycle detection and chain execution.
+- Bulk room creation endpoints for faster setup.
+
+Detailed explanation of newly adopted baseline features:
+
+1) Happiness Scoring for Allocation Outcomes
+- Objective: convert allocation quality into a measurable, student-centric metric.
+- What it does: each allocation result stores a 0-100 happiness score representing how well constraints and social preferences were satisfied.
+- Why it matters: gives wardens a quantitative way to compare runs, identify low-satisfaction assignments, and improve policy/rule tuning over time.
+- Operational impact: supports transparent reporting and can be used as an optimization KPI in future algorithm iterations.
+
+2) Detailed Allocation Decision Audit Trail
+- Objective: make every allocation explainable and auditable.
+- What it does: for each student decision, the system captures candidate rooms, constraints applied, selection reason, and alternatives not selected.
+- Why it matters: reduces trust issues around automated decisions and enables fast debugging when students/admins challenge a room assignment.
+- Operational impact: creates a compliance-friendly trace that supports grievance handling and post-run analytics.
+
+3) Swap Cycle Detection and Chain Execution
+- Objective: increase successful room exchange outcomes beyond direct one-to-one swaps.
+- What it does: identifies feasible multi-student cycle swaps (A->B->C->A) and executes them as coordinated chain operations.
+- Why it matters: many practical swap scenarios fail in direct mode but are solvable as cycles; this improves utilization and student satisfaction.
+- Operational impact: lowers manual intervention load for wardens and provides a scalable mechanism for complex swap resolution.
+
+4) Bulk Room Creation Endpoints
+- Objective: speed up annual or semester hostel setup.
+- What it does: allows admins to create large batches of rooms by hostel/wing/floor patterns in one operation.
+- Why it matters: avoids repetitive manual entry and reduces configuration errors during onboarding or infrastructure updates.
+- Operational impact: materially shortens admin setup time and improves consistency in room inventory data.
+
+Plan integration note:
+- These four capabilities are now considered part of the active baseline scope (not optional enhancements).
+- Future compliance checks should evaluate them as standard deliverables under allocation quality, transparency, operations, and admin efficiency.
+
 
 Introduction: From Manual Chaos to Automated Order
 
