@@ -404,6 +404,8 @@ class AllocationEngine:
         """
         if mode == "fcfs":
             return self.run_fcfs_allocation()
+        elif mode == "wing_fcfs":
+            return self.run_wing_fcfs_allocation()
         else:
             return self.run_group_based_allocation()
 
@@ -469,6 +471,63 @@ class AllocationEngine:
                         happiness=60  # Neutral-positive happiness for FCFS
                     ))
                     break
+
+        return results
+
+    def run_wing_fcfs_allocation(self) -> List[AllocationResult]:
+        """
+        Execute Wing-FCFS allocation algorithm.
+        Groups (treated as 'wings') are allocated in FCFS order based on earliest member timestamp.
+        Each wing is placed compactly (same hostel, nearby rooms when possible).
+        """
+        results: List[AllocationResult] = []
+
+        # Initialize state
+        state = AllocationState(
+            wing_capacities={k: v.available_beds for k, v in self.wings.items()},
+            room_assignments={},
+            student_allocations={}
+        )
+
+        # Sort groups by earliest application timestamp among members (FCFS)
+        def get_wing_timestamp(group: Group) -> str:
+            if not group.members:
+                return "9999-12-31T23:59:59"
+            timestamps = [m.application_timestamp or "9999-12-31T23:59:59" for m in group.members]
+            return min(timestamps)
+
+        sorted_wings = sorted(self.groups, key=get_wing_timestamp)
+
+        # Allocate wings in FCFS order
+        for wing_group in sorted_wings:
+            unallocated_members = [
+                m for m in wing_group.members
+                if m.user_id not in state.student_allocations
+            ]
+
+            if not unallocated_members:
+                continue
+
+            # Try to find a single physical wing that can accommodate all members
+            best_wing = self._find_best_wing_for_group(unallocated_members, state)
+
+            if best_wing:
+                # Entire wing fits in one physical wing - allocate together
+                wing_results = self._allocate_group_to_wing(
+                    unallocated_members, best_wing, state, group_id=wing_group.id
+                )
+                results.extend(wing_results)
+            else:
+                # Wing too large - use proximity-aware splitting to keep compact
+                split_results = self._allocate_group_split(wing_group, unallocated_members, state)
+                results.extend(split_results)
+
+        # Allocate remaining individual students (not in any wing)
+        for student_id, student in self.students.items():
+            if student_id not in state.student_allocations:
+                result = self._allocate_individual(student, state)
+                if result:
+                    results.append(result)
 
         return results
 

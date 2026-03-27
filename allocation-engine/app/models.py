@@ -65,7 +65,7 @@ class AllocationRule(BaseModel):
 class AllocationRequest(BaseModel):
     allocation_run_id: Optional[str] = None
     rules: List[AllocationRule]
-    allocation_mode: str = "group_based"  # "group_based" or "fcfs"
+    allocation_mode: str = "group_based"  # "group_based", "fcfs", or "wing_fcfs"
 
 
 class AllocationResult(BaseModel):
