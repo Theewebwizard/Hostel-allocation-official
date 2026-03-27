@@ -41,8 +41,10 @@ import {
   type Room,
   type AllocationRule,
   type AllocationRun,
+  type AllocationResult,
   type SwapRequest,
   type SwapChain,
+  type WingParticipationSetting,
 } from "~/lib/api";
 
 export function meta() {
@@ -90,9 +92,13 @@ export default function AdminPage() {
   const [rules, setRules] = useState<AllocationRule[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [allocationRuns, setAllocationRuns] = useState<AllocationRun[]>([]);
-  const [allocationResults, setAllocationResults] = useState<any[]>([]);
+  const [allocationResults, setAllocationResults] =
+    useState<AllocationResult[]>([]);
   const [swapRequests, setSwapRequests] = useState<SwapRequest[]>([]);
   const [swapChains, setSwapChains] = useState<SwapChain[]>([]);
+  const [wingSettings, setWingSettings] = useState<
+    WingParticipationSetting[]
+  >([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -149,9 +155,9 @@ export default function AdminPage() {
   const [scheduleTime, setScheduleTime] = useState("");
 
   // Allocation mode
-  const [allocationMode, setAllocationMode] = useState<"group_based" | "fcfs">(
-    "group_based",
-  );
+  const [allocationMode, setAllocationMode] = useState<
+    "group_based" | "fcfs" | "wing_fcfs"
+  >("group_based");
 
   useEffect(() => {
     checkAuth();
@@ -184,6 +190,7 @@ export default function AdminPage() {
         studentsRes,
         swapsRes,
         cyclesRes,
+        wingRes,
       ] = await Promise.all([
         adminApi.getDashboardStats(),
         adminApi.getAllHostels(),
@@ -193,6 +200,7 @@ export default function AdminPage() {
         studentsApi.getAll().catch(() => ({ data: [] })),
         swapsApi.getAll().catch(() => ({ data: [] })),
         swapsApi.detectCycles().catch(() => ({ data: [] })),
+        adminApi.getWingParticipationSettings().catch(() => ({ data: [] })),
       ]);
       setStats(statsRes.data);
       setHostels(hostelsRes.data);
@@ -202,6 +210,7 @@ export default function AdminPage() {
       setStudents(studentsRes.data || []);
       setSwapRequests(swapsRes.data || []);
       setSwapChains(cyclesRes.data || []);
+      setWingSettings(wingRes.data || []);
     } catch (err: any) {
       if (err.response?.status !== 401) {
         setError("Failed to load data. Make sure the backend is running.");
@@ -396,17 +405,17 @@ export default function AdminPage() {
 
   const handleApproveAllocation = async (runId: string) => {
     if (
-      !confirm("Approve this allocation? Room assignments will be finalized.")
+      !confirm("Finalize this allocation? Room assignments will be locked permanently.")
     )
       return;
     setError("");
     setSuccess("");
     try {
-      // In a real implementation, this would call an endpoint to finalize
-      setSuccess("Allocation approved and saved to database!");
+      await adminApi.finalizeAllocationRun(runId);
+      setSuccess("Allocation finalized! Room assignments are now locked.");
       loadAllData();
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to approve allocation");
+      setError(err.response?.data?.message || "Failed to finalize allocation");
     }
   };
 
@@ -1499,19 +1508,35 @@ export default function AdminPage() {
                       <option value="fcfs">
                         First-Come-First-Serve (FCFS)
                       </option>
+                      <option value="wing_fcfs">
+                        Wing FCFS (Groups by Earliest Timestamp)
+                      </option>
                     </select>
                     <p className="text-sm text-gray-600 mt-2">
                       {allocationMode === "fcfs"
-                        ? "⏱️ Students will be allocated strictly by application timestamp, ignoring group preferences."
-                        : "👥 Groups will be optimized for proximity and cohesion. Students allocated together when possible."}
+                        ? "⏱️ Students allocated strictly by application timestamp, ignoring groups."
+                        : allocationMode === "wing_fcfs"
+                          ? "🏠 Groups allocated in FCFS order by their earliest member timestamp. Members placed in the same physical wing when possible."
+                          : "👥 Groups optimized for proximity and cohesion. Students allocated together when possible."}
                     </p>
                   </div>
+
+                  {/* Finalized warning */}
+                  {allocationRuns.some((r) => r.finalized) && (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-amber-700">
+                      <CheckCircle className="w-5 h-5 shrink-0" />
+                      <span>
+                        An allocation has been finalized. Re-running is blocked to protect room assignments.
+                      </span>
+                    </div>
+                  )}
 
                   {/* Run Now Button */}
                   <Button
                     onClick={handleRunAllocation}
                     className="w-full"
                     size="lg"
+                    disabled={allocationRuns.some((r) => r.finalized)}
                   >
                     <Play className="w-5 h-5 mr-2" />
                     Run Allocation Now
@@ -1546,8 +1571,18 @@ export default function AdminPage() {
                             <Clock className="w-6 h-6 text-yellow-500" />
                           )}
                           <div>
-                            <p className="font-medium">
+                            <p className="font-medium flex items-center gap-2">
                               Run #{run.id.slice(0, 8)}
+                              {run.allocationMode && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-normal">
+                                  {run.allocationMode.replace("_", " ")}
+                                </span>
+                              )}
+                              {run.finalized && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-normal">
+                                  finalized
+                                </span>
+                              )}
                             </p>
                             <p className="text-sm text-gray-500">
                               {new Date(run.startTime).toLocaleString()}
@@ -1555,7 +1590,7 @@ export default function AdminPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
-                          {run.status === "completed" && (
+                          {run.status === "completed" && !run.finalized && (
                             <>
                               <span className="text-sm text-gray-600">
                                 {run.allocatedStudents}/{run.totalStudents}{" "}
@@ -1567,9 +1602,14 @@ export default function AdminPage() {
                                 onClick={() => handleApproveAllocation(run.id)}
                               >
                                 <Check className="w-4 h-4 mr-1" />
-                                Approve
+                                Finalize
                               </Button>
                             </>
+                          )}
+                          {run.status === "completed" && run.finalized && (
+                            <span className="text-sm text-gray-600">
+                              {run.allocatedStudents}/{run.totalStudents} allocated
+                            </span>
                           )}
                           <span
                             className={`px-3 py-1 text-xs font-medium rounded-full ${
