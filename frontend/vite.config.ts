@@ -31,6 +31,18 @@ export default defineConfig({
         target: "http://localhost:3000",
         changeOrigin: true,
       },
+      "/swaps": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+        bypass: (req) => {
+          // Allow React Router to handle page navigation to /swaps
+          // Only proxy API calls to /swaps/*
+          if (req.url === "/swaps" && req.method === "GET") {
+            return "/swaps"; // Don't proxy, let React Router handle it
+          }
+          return undefined; // Proxy to backend
+        },
+      },
     },
   },
 });
