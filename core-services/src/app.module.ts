@@ -22,6 +22,7 @@ import {
   AllocationDecision,
   SwapRequest,
   SwapHistory,
+  WingParticipationSetting,
 } from './entities';
 
 @Module({
@@ -51,6 +52,7 @@ import {
           AllocationDecision,
           SwapRequest,
           SwapHistory,
+          WingParticipationSetting,
         ],
         synchronize: configService.get('NODE_ENV') === 'development', // Auto-sync in dev only
       }),

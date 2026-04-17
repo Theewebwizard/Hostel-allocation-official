@@ -23,6 +23,9 @@ export class AllocationRule {
   @Column({ nullable: true })
   roomType: string;
 
+  @Column({ nullable: true })
+  wing: string;
+
   @Column({ default: true })
   isAllowed: boolean;
 

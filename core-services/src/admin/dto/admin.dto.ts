@@ -128,6 +128,14 @@ export class CreateRuleDto {
   @IsString()
   roomType?: string;
 
+  @ApiPropertyOptional({
+    example: 'A',
+    description: 'Wing restriction (optional) - e.g., "A", "B", "C"',
+  })
+  @IsOptional()
+  @IsString()
+  wing?: string;
+
   @ApiProperty({
     example: true,
     description: 'Is this combination allowed?',
@@ -168,7 +176,10 @@ export class UpdateRuleDto {
   @IsOptional()
   @IsString()
   roomType?: string;
-
+  @ApiPropertyOptional({ example: 'A' })
+  @IsOptional()
+  @IsString()
+  wing?: string;
   @ApiPropertyOptional({ example: false })
   @IsOptional()
   @IsBoolean()

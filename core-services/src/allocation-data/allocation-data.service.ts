@@ -25,6 +25,8 @@ export class AllocationDataService {
     private roomRepository: Repository<Room>,
     @InjectRepository(AllocationResult)
     private allocationResultRepository: Repository<AllocationResult>,
+    @InjectRepository(AllocationRule)
+    private ruleRepository: Repository<AllocationRule>,
   ) {}
 
   async getAllStudents() {
@@ -88,11 +90,12 @@ export class AllocationDataService {
   }
 
   async getAllData() {
-    const [students, groups, hostels, rooms] = await Promise.all([
+    const [students, groups, hostels, rooms, rules] = await Promise.all([
       this.getAllStudents(),
       this.getAllGroups(),
       this.getAllHostels(),
       this.getAllRooms(),
+      this.getAllRules(),
     ]);
 
     return {
@@ -100,7 +103,14 @@ export class AllocationDataService {
       groups,
       hostels,
       rooms,
+      rules,
     };
+  }
+
+  async getAllRules() {
+    return this.ruleRepository.find({
+      order: { priority: 'DESC', id: 'ASC' },
+    });
   }
 
   async saveAllocationResults(runId: string, results: any[]) {

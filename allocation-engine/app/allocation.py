@@ -135,8 +135,14 @@ class AllocationEngine:
     def _get_valid_rooms_for_student(self, student: Student) -> List[Room]:
         """
         Stage 1: CSP - Filter valid rooms for a student based on rules and gender constraints
+        
+        Rule Logic:
+        - If a BLOCKING rule applies to (hostel, wing, year), student is blocked
+        - If an ALLOWING rule applies to (hostel, wing, year), student is allowed
+        - If NO rules apply to (hostel), student is allowed (default)
         """
         valid_rooms = []
+        debug_info = f"Student {student.user_id} (Year {student.year}, Gender {student.gender.value})"
 
         for room in self.rooms.values():
             if room.status.value != "available":
@@ -153,7 +159,10 @@ class AllocationEngine:
                 continue
 
             # Rule-based constraints with priority evaluation
-            is_valid = True
+            is_blocked = False
+            is_explicitly_allowed = False
+            applied_rules = []
+            
             # Sort rules by priority (highest first) for proper evaluation
             sorted_rules = sorted(self.rules, key=lambda r: r.priority, reverse=True)
 
@@ -162,24 +171,46 @@ class AllocationEngine:
                 if rule.hostel_id is not None and rule.hostel_id != room.hostel_id:
                     continue
 
-                # Year constraint
-                if rule.year is not None:
-                    if rule.year == student.year:
-                        if not rule.is_allowed:
-                            is_valid = False
-                            break
-                    # If rule specifies a different year, it doesn't affect this student
+                # Wing constraint: if rule specifies a wing, check room's wing
+                if rule.wing is not None:
+                    if rule.wing != room.wing:
+                        continue  # This rule doesn't apply to this room
 
-                # Room type constraint
-                if rule.room_type is not None:
-                    if rule.room_type == room.room_type and not rule.is_allowed:
-                        if rule.year is None or rule.year == student.year:
-                            is_valid = False
-                            break
+                # Check if this rule applies to this student's year
+                if rule.year is not None and rule.year != student.year:
+                    continue  # This rule doesn't apply to this student's year
+                
+                # At this point, the rule applies to (hostel, wing?, year?)
+                applied_rules.append(f"Rule {rule.id}: hostel={rule.hostel_id}, wing={rule.wing}, year={rule.year}, isAllowed={rule.is_allowed}")
+                
+                # Check if it's a blocking or allowing rule
+                if not rule.is_allowed:
+                    # This is a BLOCKING rule
+                    is_blocked = True
+                    break  # Stop processing - highest priority blocking rule wins
+                else:
+                    # This is an ALLOWING rule
+                    is_explicitly_allowed = True
 
-            if is_valid:
+            # Room is valid if:
+            # 1. Not blocked by any rule, AND
+            # 2. Either explicitly allowed by a rule OR no rules apply to this hostel
+            if not is_blocked:
                 valid_rooms.append(room)
+                if len(valid_rooms) <= 3:  # Debug first few valid rooms
+                    print(f"DEBUG: {debug_info} -> VALID room {room.room_number} in {hostel.name} Wing {room.wing}")
+                    if applied_rules:
+                        for rule in applied_rules[:2]:  # Show first 2 applied rules
+                            print(f"  Applied: {rule}")
+            elif len(valid_rooms) == 0 and len([r for r in self.rooms.values() if r.hostel_id == room.hostel_id]) <= 5:  # Debug why first few rooms are blocked
+                print(f"DEBUG: {debug_info} -> BLOCKED room {room.room_number} in {hostel.name} Wing {room.wing}")
+                if applied_rules:
+                    for rule in applied_rules[:2]:
+                        print(f"  Applied: {rule}")
 
+        if not valid_rooms:
+            print(f"DEBUG: {debug_info} -> NO VALID ROOMS FOUND!")
+        
         return valid_rooms
 
     def _get_valid_wing_keys_for_student(self, student: Student) -> set:

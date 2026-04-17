@@ -58,6 +58,7 @@ class AllocationRule(BaseModel):
     hostel_id: Optional[int] = None
     year: Optional[int] = None
     room_type: Optional[str] = None
+    wing: Optional[str] = None
     is_allowed: bool = True
     priority: int = 0
 
