@@ -53,12 +53,12 @@ export function SearchableSelect({
   return (
     <div className="relative w-full" ref={dropdownRef}>
       {label && (
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+        <label className="block text-sm font-medium text-slate-700 mb-1">
           {label}
         </label>
       )}
       <div
-        className={`relative w-full px-4 py-2 border rounded-lg cursor-pointer bg-white dark:bg-slate-900 border-gray-300 dark:border-slate-700 hover:border-gray-400 dark:hover:border-slate-600 transition-colors flex items-center justify-between ${
+        className={`relative w-full px-4 py-2 border rounded-lg cursor-pointer bg-white border-slate-200 hover:border-slate-300 transition-colors flex items-center justify-between ${
           disabled ? "opacity-50 cursor-not-allowed" : ""
         }`}
         onClick={() => !disabled && setIsOpen(!isOpen)}
@@ -66,11 +66,11 @@ export function SearchableSelect({
         <div className="truncate flex-1">
           {selectedOption ? (
             <div className="flex flex-col">
-              <span className="text-sm font-medium text-slate-900 dark:text-white">
+              <span className="text-sm font-medium text-slate-900">
                 {selectedOption.label}
               </span>
               {selectedOption.subLabel && (
-                <span className="text-xs text-slate-500 dark:text-slate-400">
+                <span className="text-xs text-slate-500">
                   {selectedOption.subLabel}
                 </span>
               )}
@@ -87,13 +87,13 @@ export function SearchableSelect({
       </div>
 
       {isOpen && (
-        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col">
-          <div className="p-2 border-b border-gray-100 dark:border-slate-800">
+        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col">
+          <div className="p-2 border-b border-slate-100">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 autoFocus
-                className="w-full pl-8 pr-4 py-1.5 text-sm bg-gray-50 dark:bg-slate-800 text-slate-900 dark:text-white border-none rounded-md focus:ring-0"
+                className="w-full pl-8 pr-4 py-1.5 text-sm bg-slate-50 text-slate-900 border-none rounded-md focus:ring-0"
                 placeholder="Search..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -105,9 +105,9 @@ export function SearchableSelect({
               filteredOptions.map((opt) => (
                 <div
                   key={opt.id}
-                  className={`px-4 py-2 cursor-pointer hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors ${
+                  className={`px-4 py-2 cursor-pointer hover:bg-indigo-50 transition-colors ${
                     opt.id === value
-                      ? "bg-indigo-50 dark:bg-indigo-900/20"
+                      ? "bg-indigo-50"
                       : ""
                   }`}
                   onClick={() => {
@@ -117,11 +117,11 @@ export function SearchableSelect({
                   }}
                 >
                   <div className="flex flex-col">
-                    <span className="text-sm font-medium text-slate-900 dark:text-white">
+                    <span className="text-sm font-medium text-slate-900">
                       {opt.label}
                     </span>
                     {opt.subLabel && (
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-xs text-slate-500">
                         {opt.subLabel}
                       </span>
                     )}

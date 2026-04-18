@@ -22,6 +22,7 @@ import {
   LogOut,
   ArrowLeftRight,
   Info,
+  LayoutGrid,
 } from "lucide-react";
 import { Tooltip } from "react-tooltip";
 import {
@@ -702,16 +703,16 @@ export default function AdminPage() {
                 {hostelHierarchy.map((hostel) => (
                   <Card
                     key={hostel.id}
-                    className="hover:shadow-md transition-all border-slate-200 dark:border-slate-800"
+                    className="hover:shadow-md transition-all border-slate-200 "
                   >
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div>
-                          <CardTitle className="flex items-center gap-2 text-slate-900 dark:text-white">
+                          <CardTitle className="flex items-center gap-2 text-slate-900 ">
                             <Building2 className="w-5 h-5 text-indigo-600" />
                             {hostel.name}
                           </CardTitle>
-                          <CardDescription className="text-slate-500 dark:text-slate-400">
+                          <CardDescription className="text-slate-500 ">
                             Gender: {hostel.genderType}
                           </CardDescription>
                         </div>
@@ -732,7 +733,7 @@ export default function AdminPage() {
                               e.stopPropagation();
                               handleDeleteHostel(hostel.id);
                             }}
-                            className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-2 rounded-lg transition-colors"
+                            className="text-red-500 hover:bg-red-50  p-2 rounded-lg transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -741,7 +742,7 @@ export default function AdminPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-4">
-                        <p className="text-sm font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                        <p className="text-sm font-bold text-slate-700  flex items-center gap-2">
                           <LayoutGrid className="w-4 h-4" />
                           Floors: {hostel.floors.length}
                         </p>
@@ -749,21 +750,21 @@ export default function AdminPage() {
                           {hostel.floors.map((floor: any) => (
                             <div
                               key={floor.floor}
-                              className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800"
+                              className="p-3 bg-slate-50  rounded-lg border border-slate-100 "
                             >
-                              <p className="font-bold text-slate-900 dark:text-white text-sm mb-2">
+                              <p className="font-bold text-slate-900  text-sm mb-2">
                                 Floor {floor.floor}
                               </p>
                               <div className="grid grid-cols-1 gap-2">
                                 {floor.wings.map((wing: any, idx: number) => (
                                   <div
                                     key={idx}
-                                    className="flex items-center justify-between text-xs p-2 bg-white dark:bg-slate-900 rounded border border-slate-100 dark:border-slate-800"
+                                    className="flex items-center justify-between text-xs p-2 bg-white  rounded border border-slate-100 "
                                   >
-                                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                                    <span className="font-medium text-slate-700 ">
                                       Wing {wing.wing}
                                     </span>
-                                    <span className="text-slate-500 dark:text-slate-400 font-medium">
+                                    <span className="text-slate-500  font-medium">
                                       {wing.roomCount} rooms • {wing.capacityType}
                                     </span>
                                   </div>
@@ -777,8 +778,8 @@ export default function AdminPage() {
                   </Card>
                 ))}
                 {hostelHierarchy.length === 0 && (
-                  <div className="col-span-full text-center py-12 text-gray-500 dark:text-slate-500 bg-white dark:bg-slate-900 rounded-lg border border-dashed dark:border-slate-800">
-                    <Building2 className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-slate-700" />
+                  <div className="col-span-full text-center py-12 text-gray-500  bg-white  rounded-lg border border-dashed ">
+                    <Building2 className="w-12 h-12 mx-auto mb-3 text-gray-300 " />
                     <p>No hostels yet. Click "Add Hostel" to create one.</p>
                   </div>
                 )}
@@ -974,11 +975,11 @@ export default function AdminPage() {
                       className="grid grid-cols-2 md:grid-cols-4 gap-4"
                     >
                       <div>
-                        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">
+                        <label className="block text-sm font-semibold text-slate-700  mb-1">
                           Hostel *
                         </label>
                         <select
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white  text-slate-900  focus:ring-2 focus:ring-indigo-500"
                           value={bulkRoomForm.hostelId || ""}
                           onChange={(e) =>
                             setBulkRoomForm({
@@ -997,7 +998,7 @@ export default function AdminPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
+                        <label className="block text-sm font-medium text-slate-700  mb-1">
                           Wing
                         </label>
                         <Input
@@ -1009,11 +1010,11 @@ export default function AdminPage() {
                               wing: e.target.value,
                             })
                           }
-                          className="dark:bg-slate-900 dark:text-white"
+                          className=" "
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
+                        <label className="block text-sm font-medium text-slate-700  mb-1">
                           Floor
                         </label>
                         <Input
@@ -1025,11 +1026,11 @@ export default function AdminPage() {
                               floor: Number(e.target.value),
                             })
                           }
-                          className="dark:bg-slate-900 dark:text-white"
+                          className=" "
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-200 mb-1">
+                        <label className="block text-sm font-medium text-slate-700  mb-1">
                           Start Room #
                         </label>
                         <Input

@@ -344,7 +344,7 @@ export default function SwapsPage() {
                     value={selectedStudentId}
                     onChange={(val) => setSelectedStudentId(val as string)}
                   />
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
+                  <p className="text-xs text-slate-500  mt-1 font-medium">
                     Leave empty to create an open swap request visible to all
                   </p>
                 </div>

@@ -128,7 +128,7 @@ export class AdminService {
           .sort((a, b) => a.floor - b.floor)
           .map((f) => ({
             floor: f.floor,
-            wings: Array.from(f.wings.values()).sort((a, b) =>
+            wings: Array.from(f.wings.values()).sort((a: any, b: any) =>
               a.wing.localeCompare(b.wing),
             ),
           })),
@@ -137,6 +137,9 @@ export class AdminService {
   }
 
   async getHostelById(id: number): Promise<Hostel> {
+    if (isNaN(id)) {
+      throw new BadRequestException('Invalid hostel ID');
+    }
     const hostel = await this.hostelRepository.findOne({ where: { id } });
     if (!hostel) {
       throw new NotFoundException('Hostel not found');

@@ -53,7 +53,7 @@ export class Room {
   })
   status: RoomStatus;
 
-  @ManyToOne(() => Hostel)
+  @ManyToOne(() => Hostel, (hostel) => hostel.rooms)
   @JoinColumn({ name: 'hostelId' })
   hostel: Hostel;
 }

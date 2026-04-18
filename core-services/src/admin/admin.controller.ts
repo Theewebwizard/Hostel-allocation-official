@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Request,
+  ParseIntPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -80,26 +81,26 @@ export class AdminController {
   @ApiOperation({ summary: 'Get hostel by ID' })
   @ApiResponse({ status: 200, description: 'Hostel details' })
   @ApiResponse({ status: 404, description: 'Hostel not found' })
-  async getHostelById(@Param('id') id: string) {
-    return this.adminService.getHostelById(parseInt(id));
+  async getHostelById(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.getHostelById(id);
   }
 
   @Patch('hostels/:id')
   @ApiOperation({ summary: 'Update a hostel' })
   @ApiResponse({ status: 200, description: 'Hostel updated' })
   async updateHostel(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateHostelDto: UpdateHostelDto,
   ) {
-    return this.adminService.updateHostel(parseInt(id), updateHostelDto);
+    return this.adminService.updateHostel(id, updateHostelDto);
   }
 
   @Delete('hostels/:id')
   @ApiOperation({ summary: 'Delete a hostel' })
   @ApiResponse({ status: 200, description: 'Hostel deleted' })
   @ApiResponse({ status: 400, description: 'Hostel has rooms' })
-  async deleteHostel(@Param('id') id: string) {
-    return this.adminService.deleteHostel(parseInt(id));
+  async deleteHostel(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.deleteHostel(id);
   }
 
   // ============ ROOM MANAGEMENT ============
@@ -130,25 +131,25 @@ export class AdminController {
   @Get('rooms/:id')
   @ApiOperation({ summary: 'Get room by ID' })
   @ApiResponse({ status: 200, description: 'Room details' })
-  async getRoomById(@Param('id') id: string) {
-    return this.adminService.getRoomById(parseInt(id));
+  async getRoomById(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.getRoomById(id);
   }
 
   @Patch('rooms/:id')
   @ApiOperation({ summary: 'Update a room' })
   @ApiResponse({ status: 200, description: 'Room updated' })
   async updateRoom(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateRoomDto: UpdateRoomDto,
   ) {
-    return this.adminService.updateRoom(parseInt(id), updateRoomDto);
+    return this.adminService.updateRoom(id, updateRoomDto);
   }
 
   @Delete('rooms/:id')
   @ApiOperation({ summary: 'Delete a room' })
   @ApiResponse({ status: 200, description: 'Room deleted' })
-  async deleteRoom(@Param('id') id: string) {
-    return this.adminService.deleteRoom(parseInt(id));
+  async deleteRoom(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.deleteRoom(id);
   }
 
   // ============ ALLOCATION RULES ============
@@ -170,25 +171,25 @@ export class AdminController {
   @Get('rules/:id')
   @ApiOperation({ summary: 'Get rule by ID' })
   @ApiResponse({ status: 200, description: 'Rule details' })
-  async getRuleById(@Param('id') id: string) {
-    return this.adminService.getRuleById(parseInt(id));
+  async getRuleById(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.getRuleById(id);
   }
 
   @Patch('rules/:id')
   @ApiOperation({ summary: 'Update a rule' })
   @ApiResponse({ status: 200, description: 'Rule updated' })
   async updateRule(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() updateRuleDto: UpdateRuleDto,
   ) {
-    return this.adminService.updateRule(parseInt(id), updateRuleDto);
+    return this.adminService.updateRule(id, updateRuleDto);
   }
 
   @Delete('rules/:id')
   @ApiOperation({ summary: 'Delete a rule' })
   @ApiResponse({ status: 200, description: 'Rule deleted' })
-  async deleteRule(@Param('id') id: string) {
-    return this.adminService.deleteRule(parseInt(id));
+  async deleteRule(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.deleteRule(id);
   }
 
   // ============ ALLOCATION RUNS ============
@@ -248,10 +249,10 @@ export class AdminController {
     description: 'Cannot modify finalized allocation',
   })
   async updateAllocationResult(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateAllocationResultDto,
   ) {
-    return this.adminService.updateAllocationResult(parseInt(id), dto.roomId);
+    return this.adminService.updateAllocationResult(id, dto.roomId);
   }
 
   // ============ WING PARTICIPATION SETTINGS ============

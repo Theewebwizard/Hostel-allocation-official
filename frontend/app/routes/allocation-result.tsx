@@ -306,16 +306,16 @@ export default function AllocationResultPage() {
                 </Card>
               </div>
 
-              <Card className="bg-slate-900 text-white border-none shadow-2xl rounded-3xl overflow-hidden group">
+              <Card className={`${theme.light} border-${theme.primary}-100 shadow-2xl rounded-3xl overflow-hidden group`}>
                 <CardContent className="p-8 relative">
-                  <div className={`absolute -right-10 -top-10 w-32 h-32 bg-${theme.primary}-500/20 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700`} />
+                  <div className={`absolute -right-10 -top-10 w-32 h-32 bg-${theme.primary}-500/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700`} />
                   <div className="flex gap-5 relative z-10">
-                    <div className={`p-3 bg-white/10 rounded-2xl h-fit border border-white/10 ${theme.icon}`}>
+                    <div className={`p-3 bg-white rounded-2xl h-fit border ${theme.border} shadow-sm ${theme.icon}`}>
                       <Sparkles className="w-6 h-6" />
                     </div>
                     <div>
-                      <p className="font-black text-xl text-white tracking-wide">Swap Window</p>
-                      <p className="text-slate-400 text-sm mt-2 leading-relaxed font-medium">
+                      <p className={`font-black text-xl ${theme.text} tracking-wide`}>Swap Window</p>
+                      <p className={`text-slate-600 text-sm mt-2 leading-relaxed font-medium`}>
                         Not happy with your floor or wing? Use the **Room Swaps** 
                         tool to exchange with other students once the portal opens.
                       </p>

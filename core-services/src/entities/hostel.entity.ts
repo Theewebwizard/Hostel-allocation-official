@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
+import { Room } from './room.entity';
 
 export enum GenderType {
   MALE = 'male',
@@ -24,4 +25,7 @@ export class Hostel {
     enum: GenderType,
   })
   genderType: GenderType;
+
+  @OneToMany(() => Room, (room) => room.hostel)
+  rooms: Room[];
 }

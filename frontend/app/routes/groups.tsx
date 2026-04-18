@@ -275,13 +275,13 @@ export default function GroupsPage() {
     return (
       <DashboardLayout>
         <div className="max-w-4xl mx-auto py-8 px-4">
-          <Card className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/30">
+          <Card className="bg-amber-50  border-amber-200 ">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-amber-800 dark:text-amber-400 font-bold">
+              <CardTitle className="flex items-center gap-2 text-amber-800  font-bold">
                 <AlertCircle className="w-5 h-5" />
                 Group Features Disabled
               </CardTitle>
-              <CardDescription className="text-amber-700 dark:text-amber-500 font-medium">
+              <CardDescription className="text-amber-700  font-medium">
                 The current allocation policy is set to Individual (FCFS). Group
                 formations and roommate invitations are currently disabled.
               </CardDescription>
@@ -483,19 +483,19 @@ export default function GroupsPage() {
               )}
 
               {/* Roommate Invitation Section */}
-              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+              <div className="pt-6 border-t border-slate-200 ">
+                <h3 className="font-bold text-slate-900  mb-3 flex items-center gap-2">
                   <UserCheck className="w-5 h-5 text-green-600" />
                   Preferred Roommate
                 </h3>
 
                 {roommateInvitations.find((i) => i.status === "accepted") ? (
-                  <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-900/30 rounded-lg flex items-center justify-between">
+                  <div className="p-4 bg-green-50  border border-green-100  rounded-lg flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-green-700 dark:text-green-400 font-medium">
+                      <p className="text-sm text-green-700  font-medium">
                         Your current preferred roommate is:
                       </p>
-                      <p className="font-bold text-slate-900 dark:text-white">
+                      <p className="font-bold text-slate-900 ">
                         {(() => {
                           const accepted = roommateInvitations.find(
                             (i) => i.status === "accepted",
@@ -546,7 +546,7 @@ export default function GroupsPage() {
                     {/* Pending Roommate Invitations */}
                     {roommateInvitations.some((i) => i.status === "pending") && (
                       <div className="space-y-2 mt-4">
-                        <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                        <p className="text-sm font-bold text-slate-700 ">
                           Pending Roommate Invitations
                         </p>
                         {roommateInvitations
@@ -554,10 +554,10 @@ export default function GroupsPage() {
                           .map((inv) => (
                             <div
                               key={inv.id}
-                              className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800"
+                              className="flex items-center justify-between p-3 bg-slate-50  rounded-lg border border-slate-100 "
                             >
                               <div>
-                                <p className="text-sm font-bold text-slate-900 dark:text-white">
+                                <p className="text-sm font-bold text-slate-900 ">
                                   {inv.senderId === user?.id
                                     ? `To: ${inv.receiver?.fullName}`
                                     : `From: ${inv.sender?.fullName}`}
