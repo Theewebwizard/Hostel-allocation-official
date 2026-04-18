@@ -136,11 +136,11 @@ export default function AllocationResultPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
           {/* Main Assignment Card */}
-          <div className="lg:col-span-8 space-y-10">
+          <div className={`${result.groupId ? "lg:col-span-8" : "lg:col-span-12"} space-y-10`}>
             <Card className={`overflow-hidden border-none shadow-2xl relative bg-white`}>
               <div className="absolute top-6 right-6 z-10">
                 <div className={`bg-white/20 backdrop-blur-xl text-white text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest border border-white/30`}>
-                  Confirmed
+                  {result.groupId ? "Group Allocation" : "Individual Allocation"}
                 </div>
               </div>
               <CardHeader className={`bg-linear-to-br ${theme.gradient} text-white pt-12 pb-20 px-8 relative overflow-hidden`}>
@@ -193,134 +193,138 @@ export default function AllocationResultPage() {
                 <div className={`flex items-center gap-3 p-4 ${theme.light} rounded-2xl border ${theme.border}`}>
                   <Sparkles className={`w-5 h-5 ${theme.icon}`} />
                   <p className={`text-sm font-bold ${theme.text}`}>
-                    This assignment is based on your {result.groupId ? "group preferences" : "application priority"}.
+                    This assignment is based on {result.groupId ? "your group's combined preferences" : "your individual application timestamp (FCFS)"}.
                   </p>
                 </div>
               </div>
             </Card>
 
-            {/* Roommates Section */}
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 ${theme.light} rounded-lg ${theme.icon}`}>
-                    <DoorOpen className="w-6 h-6" />
-                  </div>
-                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Roommates</h2>
-                </div>
-                <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">
-                  {roommates.length + 1} Total
-                </span>
-              </div>
-              
-              {roommates.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {roommates.map((mate) => (
-                    <Card key={mate.id} className="hover:shadow-lg transition-all group border-slate-200 bg-white rounded-2xl overflow-hidden">
-                      <CardContent className="p-6 flex items-center gap-5">
-                        <div className={`w-16 h-16 rounded-2xl ${theme.light} flex items-center justify-center border ${theme.border} group-hover:scale-105 transition-transform`}>
-                          <User className={`w-8 h-8 ${theme.icon}`} />
-                        </div>
-                        <div>
-                          <p className="text-xl font-black text-slate-900">{mate.student?.fullName}</p>
-                          <p className="text-sm font-bold text-slate-500 tracking-tight mt-0.5">
-                            {mate.student?.rollNumber}
-                          </p>
-                          <div className={`inline-flex items-center px-2 py-0.5 rounded-md ${theme.light} ${theme.text} text-[10px] font-black uppercase mt-2`}>
-                            {mate.student?.program}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <Card className="bg-slate-50 border-dashed border-slate-300 rounded-3xl">
-                  <CardContent className="py-12 text-center">
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100 shadow-sm">
-                      <User className="w-8 h-8 text-slate-300" />
+            {/* Roommates Section (Only if Group) */}
+            {result.groupId && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 ${theme.light} rounded-lg ${theme.icon}`}>
+                      <DoorOpen className="w-6 h-6" />
                     </div>
-                    <p className="text-slate-500 font-bold text-lg">
-                      Single Occupancy
-                    </p>
-                    <p className="text-slate-400 text-sm mt-1">
-                      You have the room to yourself!
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
+                    <h2 className="text-2xl font-black text-slate-900 tracking-tight">Roommates</h2>
+                  </div>
+                  <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">
+                    {roommates.length + 1} Total
+                  </span>
+                </div>
+                
+                {roommates.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {roommates.map((mate) => (
+                      <Card key={mate.id} className="hover:shadow-lg transition-all group border-slate-200 bg-white rounded-2xl overflow-hidden">
+                        <CardContent className="p-6 flex items-center gap-5">
+                          <div className={`w-16 h-16 rounded-2xl ${theme.light} flex items-center justify-center border ${theme.border} group-hover:scale-105 transition-transform`}>
+                            <User className={`w-8 h-8 ${theme.icon}`} />
+                          </div>
+                          <div>
+                            <p className="text-xl font-black text-slate-900">{mate.student?.fullName}</p>
+                            <p className="text-sm font-bold text-slate-500 tracking-tight mt-0.5">
+                              {mate.student?.rollNumber}
+                            </p>
+                            <div className={`inline-flex items-center px-2 py-0.5 rounded-md ${theme.light} ${theme.text} text-[10px] font-black uppercase mt-2`}>
+                              {mate.student?.program}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <Card className="bg-slate-50 border-dashed border-slate-300 rounded-3xl">
+                    <CardContent className="py-12 text-center">
+                      <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100 shadow-sm">
+                        <User className="w-8 h-8 text-slate-300" />
+                      </div>
+                      <p className="text-slate-500 font-bold text-lg">
+                        Single Occupancy
+                      </p>
+                      <p className="text-slate-400 text-sm mt-1">
+                        You have the room to yourself!
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Wing Directory Sidebar */}
-          <div className="lg:col-span-4 space-y-8">
-            <div>
-              <div className="flex items-center gap-3 mb-6">
-                <div className={`p-2 ${theme.light} rounded-lg ${theme.icon}`}>
-                  <Users className="w-6 h-6" />
+          {/* Group Members Sidebar (Only if Group) */}
+          {result.groupId && (
+            <div className="lg:col-span-4 space-y-8">
+              <div>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className={`p-2 ${theme.light} rounded-lg ${theme.icon}`}>
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">Group Members</h2>
                 </div>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Wing Directory</h2>
-              </div>
-              
-              <Card className="border-slate-200 shadow-xl bg-white rounded-3xl overflow-hidden">
-                <CardHeader className="bg-slate-50 border-b border-slate-100 py-6 px-8">
-                  <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">
-                    Neighbors in Wing {result.wing || "A"}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="divide-y divide-slate-50">
-                    {wingMates.length > 0 ? (
-                      wingMates.map((mate) => (
-                        <div key={mate.id} className="p-6 flex items-center justify-between hover:bg-slate-50 transition-colors group cursor-pointer">
-                          <div className="flex items-center gap-4">
-                            <div className={`w-10 h-10 rounded-xl ${theme.light} flex items-center justify-center text-xs font-black ${theme.text} border ${theme.border}`}>
-                              {mate.student?.fullName.split(' ').map(n => n[0]).join('')}
-                            </div>
-                            <div>
-                              <p className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{mate.student?.fullName}</p>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <span className={`text-[10px] font-black uppercase text-${theme.primary}-600`}>
-                                  Room {mate.roomNumber}
-                                </span>
-                                <span className="text-[10px] text-slate-300 font-bold">•</span>
-                                <span className="text-[10px] text-slate-400 font-bold">
-                                  {mate.student?.year} Year
-                                </span>
+                
+                <Card className="border-slate-200 shadow-xl bg-white rounded-3xl overflow-hidden">
+                  <CardHeader className="bg-slate-50 border-b border-slate-100 py-6 px-8">
+                    <CardTitle className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                      Other Members in Group
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="divide-y divide-slate-50">
+                      {wingMates.length > 0 ? (
+                        wingMates.map((mate) => (
+                          <div key={mate.id} className="p-6 flex items-center justify-between hover:bg-slate-50 transition-colors group cursor-pointer">
+                            <div className="flex items-center gap-4">
+                              <div className={`w-10 h-10 rounded-xl ${theme.light} flex items-center justify-center text-xs font-black ${theme.text} border ${theme.border}`}>
+                                {mate.student?.fullName.split(' ').map(n => n[0]).join('')}
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{mate.student?.fullName}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className={`text-[10px] font-black uppercase text-${theme.primary}-600`}>
+                                    Room {mate.roomNumber}
+                                  </span>
+                                  <span className="text-[10px] text-slate-300 font-bold">•</span>
+                                  <span className="text-[10px] text-slate-400 font-bold">
+                                    {mate.student?.year} Year
+                                  </span>
+                                </div>
                               </div>
                             </div>
+                            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:translate-x-1 transition-transform" />
                           </div>
-                          <ChevronRight className="w-5 h-5 text-slate-300 group-hover:translate-x-1 transition-transform" />
+                        ))
+                      ) : (
+                        <div className="p-12 text-center">
+                          <p className="text-sm text-slate-400 font-bold italic">All group members are in your room.</p>
                         </div>
-                      ))
-                    ) : (
-                      <div className="p-12 text-center">
-                        <p className="text-sm text-slate-400 font-bold italic">No other neighbors assigned to this wing yet.</p>
-                      </div>
-                    )}
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="bg-slate-900 text-white border-none shadow-2xl rounded-3xl overflow-hidden group">
+                <CardContent className="p-8 relative">
+                  <div className={`absolute -right-10 -top-10 w-32 h-32 bg-${theme.primary}-500/20 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700`} />
+                  <div className="flex gap-5 relative z-10">
+                    <div className={`p-3 bg-white/10 rounded-2xl h-fit border border-white/10 ${theme.icon}`}>
+                      <Sparkles className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="font-black text-xl text-white tracking-wide">Swap Window</p>
+                      <p className="text-slate-400 text-sm mt-2 leading-relaxed font-medium">
+                        Not happy with your floor or wing? Use the **Room Swaps** 
+                        tool to exchange with other students once the portal opens.
+                      </p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             </div>
-
-            <Card className="bg-slate-900 text-white border-none shadow-2xl rounded-3xl overflow-hidden group">
-              <CardContent className="p-8 relative">
-                <div className={`absolute -right-10 -top-10 w-32 h-32 bg-${theme.primary}-500/20 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700`} />
-                <div className="flex gap-5 relative z-10">
-                  <div className={`p-3 bg-white/10 rounded-2xl h-fit border border-white/10 ${theme.icon}`}>
-                    <Sparkles className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <p className="font-black text-xl text-white tracking-wide">Swap Window</p>
-                    <p className="text-slate-400 text-sm mt-2 leading-relaxed font-medium">
-                      Not happy with your floor or wing? Use the **Room Swaps** 
-                      tool to exchange with other students once the portal opens.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          )}
         </div>
       </div>
     </DashboardLayout>

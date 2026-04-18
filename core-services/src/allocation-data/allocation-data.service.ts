@@ -155,15 +155,22 @@ export class AllocationDataService {
 
     if (!result) return null;
 
-    // Find neighbors (same wing or same room)
+    // If there is no groupId, it was an individual allocation (FCFS or similar)
+    // In this case, we return no neighbors as per user request
+    if (!result.groupId) {
+      return {
+        result,
+        neighbors: [],
+      };
+    }
+
+    // Find group members (other students in the same group for the same run)
     const neighbors = await this.allocationResultRepository.find({
       where: {
         runId: result.runId,
-        hostelName: result.hostelName,
-        wing: result.wing,
-        floor: result.floor,
+        groupId: result.groupId,
       },
-      relations: ['student'],
+      relations: ["student"],
     });
 
     return {

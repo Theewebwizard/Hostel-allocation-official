@@ -183,7 +183,7 @@ def generate_students_and_groups():
                     "password": "password123", # 👈 Restored to a valid length!
                     "role": "student", 
                     "rollNumber": roll,
-                    "fullName": f"Student Y{cfg['year']} G{g_idx}", 
+                    "fullName": f"Student Y{cfg['year']} G{g_idx} S{s_idx}", 
                     "year": cfg["year"], 
                     "gender": cfg["gender"], 
                     "program": branch
