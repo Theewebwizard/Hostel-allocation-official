@@ -18,6 +18,7 @@ import {
   CardTitle,
   CardDescription,
   CardContent,
+  SearchableSelect,
 } from "~/components/ui";
 import { DashboardLayout } from "~/components/layout/DashboardLayout";
 import { useAuthStore } from "~/lib/auth-store";
@@ -26,6 +27,7 @@ import {
   studentsApi,
   type SwapRequest,
   type SwapHistory,
+  type Student,
 } from "~/lib/api";
 
 export function meta() {
@@ -56,6 +58,8 @@ export default function SwapsPage() {
   const [targetRollNumber, setTargetRollNumber] = useState("");
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [eligibleStudents, setEligibleStudents] = useState<Student[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState<string>("");
 
   // Current student info
   const [studentInfo, setStudentInfo] = useState<any>(null);
@@ -77,6 +81,15 @@ export default function SwapsPage() {
       loadData();
     }
   }, [isAuthenticated, user]);
+
+  useEffect(() => {
+    if (showCreateForm) {
+      studentsApi
+        .getEligibleForSwap()
+        .then((res) => setEligibleStudents(res.data))
+        .catch((err) => console.error("Failed to fetch eligible students", err));
+    }
+  }, [showCreateForm]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -106,34 +119,14 @@ export default function SwapsPage() {
     setSuccess("");
 
     try {
-      // If roll number provided, find the student first
-      let targetStudentId: string | undefined;
-      if (targetRollNumber.trim()) {
-        try {
-          const studentRes = await studentsApi.findByRollNumber(
-            targetRollNumber.trim(),
-          );
-          targetStudentId = studentRes.data?.userId;
-          if (!targetStudentId) {
-            setError("Student with that roll number not found");
-            setIsSubmitting(false);
-            return;
-          }
-        } catch {
-          setError("Student with that roll number not found");
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
       await swapsApi.createRequest({
-        targetStudentId,
+        targetStudentId: selectedStudentId || undefined,
         reason: reason.trim() || undefined,
       });
 
       setSuccess("Swap request created successfully!");
       setShowCreateForm(false);
-      setTargetRollNumber("");
+      setSelectedStudentId("");
       setReason("");
       loadData();
     } catch (err: any) {
@@ -340,15 +333,18 @@ export default function SwapsPage() {
             ) : showCreateForm ? (
               <form onSubmit={handleCreateRequest} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">
-                    Target Student Roll Number (optional for open request)
-                  </label>
-                  <Input
-                    placeholder="e.g., 2023CSE001"
-                    value={targetRollNumber}
-                    onChange={(e) => setTargetRollNumber(e.target.value)}
+                  <SearchableSelect
+                    label="Target Student (optional for open request)"
+                    placeholder="Search by name or roll number..."
+                    options={eligibleStudents.map((s) => ({
+                      id: s.userId,
+                      label: s.fullName,
+                      subLabel: `${s.rollNumber} • ${s.currentRoom?.hostel?.name || ""} ${s.currentRoom?.roomNumber || ""}`,
+                    }))}
+                    value={selectedStudentId}
+                    onChange={(val) => setSelectedStudentId(val as string)}
                   />
-                  <p className="text-xs text-slate-500 mt-1 font-medium">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
                     Leave empty to create an open swap request visible to all
                   </p>
                 </div>

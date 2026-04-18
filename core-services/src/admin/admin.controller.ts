@@ -69,6 +69,13 @@ export class AdminController {
     return this.adminService.getAllHostels();
   }
 
+  @Get('hostels/hierarchy')
+  @ApiOperation({ summary: 'Get hierarchical hostel structure' })
+  @ApiResponse({ status: 200, description: 'Hostel hierarchy' })
+  async getHostelHierarchy() {
+    return this.adminService.getHostelHierarchy();
+  }
+
   @Get('hostels/:id')
   @ApiOperation({ summary: 'Get hostel by ID' })
   @ApiResponse({ status: 200, description: 'Hostel details' })

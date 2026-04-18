@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from constraint import Problem, AllDifferentConstraint
 
-from .models import Student, Group, Room, Hostel, AllocationRule, AllocationResult, AllocationDecisionLog
+from .models import Student, Group, Room, Hostel, AllocationRule, AllocationResult, AllocationDecisionLog, RoommateInvitation
 
 
 @dataclass
@@ -42,13 +42,22 @@ class AllocationEngine:
         groups: List[Group],
         hostels: List[Hostel],
         rooms: List[Room],
-        rules: List[AllocationRule]
+        rules: List[AllocationRule],
+        roommate_invitations: List[RoommateInvitation] = []
     ):
         self.students = {s.user_id: s for s in students}
         self.groups = groups
         self.hostels = {h.id: h for h in hostels}
         self.rooms = {r.id: r for r in rooms}
         self.rules = rules
+        self.roommate_invitations = roommate_invitations
+
+        # Map student_id to their accepted roommate_id if any
+        self.roommate_map = {}
+        for inv in roommate_invitations:
+            if inv.status == "accepted":
+                self.roommate_map[inv.sender_id] = inv.receiver_id
+                self.roommate_map[inv.receiver_id] = inv.sender_id
 
         # Build wing structure
         self.wings = self._build_wings(rooms)
@@ -326,25 +335,67 @@ class AllocationEngine:
         )
 
         members_to_allocate = list(group_members)
+        
+        # Pre-process roommate pairs to keep them together
+        roommate_pairs = []
+        member_ids = {m.user_id for m in members_to_allocate}
+        processed = set()
+        
+        for m in members_to_allocate:
+            if m.user_id in processed:
+                continue
+            
+            rm_id = self.roommate_map.get(m.user_id)
+            if rm_id and rm_id in member_ids:
+                # We have a pair!
+                rm_member = next(x for x in members_to_allocate if x.user_id == rm_id)
+                roommate_pairs.append((m, rm_member))
+                processed.add(m.user_id)
+                processed.add(rm_id)
+        
+        lonely_members = [m for m in members_to_allocate if m.user_id not in processed]
 
         for room in available_rooms:
-            if not members_to_allocate:
-                break
-
             current_occupancy = len(state.room_assignments.get(room.id, []))
             available_spots = room.capacity - current_occupancy
 
-            # Allocate as many members as possible to this room
-            for _ in range(min(available_spots, len(members_to_allocate))):
-                member = members_to_allocate.pop(0)
+            if available_spots <= 0:
+                continue
 
+            # 1. Try to allocate roommate pairs first
+            while available_spots >= 2 and roommate_pairs:
+                pair = roommate_pairs.pop(0)
+                for member in pair:
+                    # Update state
+                    if room.id not in state.room_assignments:
+                        state.room_assignments[room.id] = []
+                    state.room_assignments[room.id].append(member.user_id)
+                    state.student_allocations[member.user_id] = room.id
+
+                    # Create result
+                    results.append(AllocationResult(
+                        student_id=member.user_id,
+                        room_id=room.id,
+                        hostel_name=wing.hostel_name,
+                        room_number=room.room_number,
+                        wing=room.wing,
+                        floor=room.floor,
+                        group_id=group_id,
+                        happiness=100  # Roommate pairs get 100 happiness
+                    ))
+                available_spots -= 2
+
+            # 2. Allocate lonely members to remaining spots
+            while available_spots >= 1 and lonely_members:
+                member = lonely_members.pop(0)
+                
                 # Update state
                 if room.id not in state.room_assignments:
                     state.room_assignments[room.id] = []
                 state.room_assignments[room.id].append(member.user_id)
                 state.student_allocations[member.user_id] = room.id
 
-                # Calculate happiness: 100 if in ideal wing, proximity-based if split
+                # Happiness calculation
                 happiness = 100
                 if target_wing_for_happiness and wing_key != target_wing_for_happiness:
                     happiness = self._proximity_score(wing_key, target_wing_for_happiness)
@@ -360,9 +411,10 @@ class AllocationEngine:
                     group_id=group_id,
                     happiness=happiness
                 ))
+                available_spots -= 1
 
         # Update wing capacity
-        allocated_count = len(group_members) - len(members_to_allocate)
+        allocated_count = len(group_members) - len(roommate_pairs) * 2 - len(lonely_members)
         state.wing_capacities[wing_key] -= allocated_count
 
         return results

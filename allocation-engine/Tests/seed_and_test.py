@@ -50,6 +50,7 @@ def clear_database():
         tables_to_truncate = [
             "allocation_decisions",
             "allocation_runs", 
+            "roommate_invitations",
             "group_memberships",
             "groups",
             "rooms",
@@ -220,10 +221,51 @@ def generate_students_and_groups():
     print("📧 Accepting invitations...")
     for p in pending:
         ms = requests.Session()
-        ms.headers.update({"Authorization": f"Bearer {student_tokens[p['email']]['token']}"})
-        ms.patch(f"{NEST_API}/groups/me/invitations/{p['gid']}", json={"status": "accepted"})
-    
-    print("✅ All students and groups generated!")
+        ms.headers.update(
+            {"Authorization": f"Bearer {student_tokens[p['email']]['token']}"}
+        )
+        ms.patch(
+            f"{NEST_API}/groups/me/invitations/{p['gid']}", json={"status": "accepted"}
+        )
+
+    print("🤝 Creating Roommate Preferences...")
+    for g in groups_data:
+        if g["size"] < 2:
+            continue
+        # Only create roommate preferences for 50% of multi-person groups
+        if random.random() > 0.5:
+            continue
+
+        # Pick two students from the group to be roommates
+        members = g["students"]
+        if len(members) >= 2:
+            s1, s2 = members[0], members[1]
+
+            s1_session = requests.Session()
+            s1_session.headers.update(
+                {"Authorization": f"Bearer {student_tokens[s1['email']]['token']}"}
+            )
+
+            # s1 sends invitation to s2
+            rm_res = s1_session.post(
+                f"{NEST_API}/roommate-invitations/send",
+                json={"receiverRollNumber": s2["rollNumber"]},
+            )
+            if rm_res.status_code in [200, 201]:
+                inv_id = rm_res.json().get("id")
+
+                s2_session = requests.Session()
+                s2_session.headers.update(
+                    {"Authorization": f"Bearer {student_tokens[s2['email']]['token']}"}
+                )
+
+                # s2 accepts
+                s2_session.post(
+                    f"{NEST_API}/roommate-invitations/{inv_id}/respond",
+                    json={"status": "accepted"},
+                )
+
+    print("✅ All students, groups, and roommate preferences generated!")
 
 if __name__ == "__main__":
     print("=" * 60)

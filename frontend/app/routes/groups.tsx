@@ -10,6 +10,9 @@ import {
   Trash2,
   LogOut,
   Crown,
+  UserCheck,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import {
   Button,
@@ -19,10 +22,18 @@ import {
   CardTitle,
   CardDescription,
   CardContent,
+  SearchableSelect,
 } from "~/components/ui";
 import { DashboardLayout } from "~/components/layout/DashboardLayout";
 import { useAuthStore } from "~/lib/auth-store";
-import { groupsApi, type Group, type Invitation } from "~/lib/api";
+import {
+  groupsApi,
+  adminApi,
+  roommateInvitationsApi,
+  type Group,
+  type Invitation,
+  type RoommateInvitation,
+} from "~/lib/api";
 
 export function meta() {
   return [
@@ -53,6 +64,12 @@ export default function GroupsPage() {
   const [inviteRollNumber, setInviteRollNumber] = useState("");
   const [isInviting, setIsInviting] = useState(false);
 
+  // Roommate invitations
+  const [roommateInvitations, setRoommateInvitations] = useState<RoommateInvitation[]>([]);
+  const [allocationPolicy, setAllocationPolicy] = useState<string>("group_based");
+  const [isSendingRoommateInvite, setIsSendingRoommateInvite] = useState(false);
+  const [selectedRoommateId, setSelectedRoommateId] = useState<string>("");
+
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
@@ -74,12 +91,16 @@ export default function GroupsPage() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [groupRes, invitationsRes] = await Promise.all([
+      const [groupRes, invRes, rmInvRes, policyRes] = await Promise.all([
         groupsApi.getMyGroup(),
         groupsApi.getMyInvitations(),
+        roommateInvitationsApi.getMyInvitations(),
+        adminApi.getAllocationPolicy(),
       ]);
       setMyGroup(groupRes.data);
-      setInvitations(invitationsRes.data);
+      setInvitations(invRes.data);
+      setRoommateInvitations(rmInvRes.data);
+      setAllocationPolicy(policyRes.data.policy);
     } catch (err) {
       console.error("Error loading data:", err);
     } finally {
@@ -145,6 +166,49 @@ export default function GroupsPage() {
     }
   };
 
+  const handleSendRoommateInvitation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRoommateId || !myGroup) return;
+
+    const receiver = myGroup.members.find(
+      (m) => m.userId === selectedRoommateId,
+    );
+    if (!receiver) return;
+
+    setIsSendingRoommateInvite(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await roommateInvitationsApi.sendInvitation(receiver.rollNumber);
+      setSuccess("Roommate invitation sent!");
+      setSelectedRoommateId("");
+      loadData();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to send invitation");
+    } finally {
+      setIsSendingRoommateInvite(false);
+    }
+  };
+
+  const handleRespondToRoommateInvitation = async (
+    id: number,
+    status: "accepted" | "rejected",
+  ) => {
+    setError("");
+    setSuccess("");
+
+    try {
+      await roommateInvitationsApi.respondToInvitation(id, status);
+      setSuccess(`Roommate invitation ${status}!`);
+      loadData();
+    } catch (err: any) {
+      setError(
+        err.response?.data?.message || "Failed to respond to roommate invitation",
+      );
+    }
+  };
+
   const handleLeaveGroup = async () => {
     if (!confirm("Are you sure you want to leave this group?")) return;
 
@@ -201,7 +265,28 @@ export default function GroupsPage() {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+          <RefreshCw className="w-8 h-8 animate-spin text-indigo-600" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (allocationPolicy === "fcfs") {
+    return (
+      <DashboardLayout>
+        <div className="max-w-4xl mx-auto py-8 px-4">
+          <Card className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-amber-800 dark:text-amber-400 font-bold">
+                <AlertCircle className="w-5 h-5" />
+                Group Features Disabled
+              </CardTitle>
+              <CardDescription className="text-amber-700 dark:text-amber-500 font-medium">
+                The current allocation policy is set to Individual (FCFS). Group
+                formations and roommate invitations are currently disabled.
+              </CardDescription>
+            </CardHeader>
+          </Card>
         </div>
       </DashboardLayout>
     );
@@ -396,6 +481,125 @@ export default function GroupsPage() {
                   </form>
                 </div>
               )}
+
+              {/* Roommate Invitation Section */}
+              <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                <h3 className="font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-green-600" />
+                  Preferred Roommate
+                </h3>
+
+                {roommateInvitations.find((i) => i.status === "accepted") ? (
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-900/30 rounded-lg flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-green-700 dark:text-green-400 font-medium">
+                        Your current preferred roommate is:
+                      </p>
+                      <p className="font-bold text-slate-900 dark:text-white">
+                        {(() => {
+                          const accepted = roommateInvitations.find(
+                            (i) => i.status === "accepted",
+                          );
+                          return accepted?.senderId === user?.id
+                            ? accepted?.receiver?.fullName
+                            : accepted?.sender?.fullName;
+                        })()}
+                      </p>
+                    </div>
+                    <Check className="w-6 h-6 text-green-600" />
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Send Invitation Form */}
+                    <form
+                      onSubmit={handleSendRoommateInvitation}
+                      className="space-y-3"
+                    >
+                      <SearchableSelect
+                        placeholder="Select from group members..."
+                        options={myGroup.members
+                          .filter(
+                            (m) =>
+                              m.userId !== user?.id && m.status === "accepted",
+                          )
+                          .map((m) => ({
+                            id: m.userId,
+                            label: m.fullName,
+                            subLabel: m.rollNumber,
+                          }))}
+                        value={selectedRoommateId}
+                        onChange={(val) => setSelectedRoommateId(val as string)}
+                      />
+                      <Button
+                        type="submit"
+                        disabled={
+                          isSendingRoommateInvite || !selectedRoommateId
+                        }
+                        className="w-full"
+                      >
+                        {isSendingRoommateInvite
+                          ? "Sending..."
+                          : "Send Roommate Invitation"}
+                      </Button>
+                    </form>
+
+                    {/* Pending Roommate Invitations */}
+                    {roommateInvitations.some((i) => i.status === "pending") && (
+                      <div className="space-y-2 mt-4">
+                        <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                          Pending Roommate Invitations
+                        </p>
+                        {roommateInvitations
+                          .filter((i) => i.status === "pending")
+                          .map((inv) => (
+                            <div
+                              key={inv.id}
+                              className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800"
+                            >
+                              <div>
+                                <p className="text-sm font-bold text-slate-900 dark:text-white">
+                                  {inv.senderId === user?.id
+                                    ? `To: ${inv.receiver?.fullName}`
+                                    : `From: ${inv.sender?.fullName}`}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {new Date(inv.createdAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                              {inv.receiverId === user?.id && (
+                                <div className="flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    onClick={() =>
+                                      handleRespondToRoommateInvitation(
+                                        inv.id,
+                                        "accepted",
+                                      )
+                                    }
+                                  >
+                                    Accept
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      handleRespondToRoommateInvitation(
+                                        inv.id,
+                                        "rejected",
+                                      )
+                                    }
+                                  >
+                                    Reject
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         ) : (

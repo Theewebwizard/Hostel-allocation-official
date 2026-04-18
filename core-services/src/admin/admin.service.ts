@@ -84,6 +84,58 @@ export class AdminService {
     });
   }
 
+  async getHostelHierarchy() {
+    const hostels = await this.hostelRepository.find({
+      order: { name: 'ASC' },
+      relations: ['rooms'],
+    });
+
+    return hostels.map((hostel) => {
+      const floorsMap = new Map<number, any>();
+
+      hostel.rooms.forEach((room) => {
+        const floorNum = room.floor || 0;
+        if (!floorsMap.has(floorNum)) {
+          floorsMap.set(floorNum, {
+            floor: floorNum,
+            wings: new Map<string, any>(),
+          });
+        }
+
+        const floor = floorsMap.get(floorNum);
+        const wingName = room.wing || 'Default';
+        const capacityType = room.roomType || (room.capacity === 1 ? 'Single' : room.capacity === 2 ? 'Double' : 'Triple');
+        
+        const wingKey = `${wingName}-${capacityType}`;
+        
+        if (!floor.wings.has(wingKey)) {
+          floor.wings.set(wingKey, {
+            wing: wingName,
+            roomCount: 0,
+            capacityType: capacityType,
+          });
+        }
+
+        const wing = floor.wings.get(wingKey);
+        wing.roomCount++;
+      });
+
+      return {
+        id: hostel.id,
+        name: hostel.name,
+        genderType: hostel.genderType,
+        floors: Array.from(floorsMap.values())
+          .sort((a, b) => a.floor - b.floor)
+          .map((f) => ({
+            floor: f.floor,
+            wings: Array.from(f.wings.values()).sort((a, b) =>
+              a.wing.localeCompare(b.wing),
+            ),
+          })),
+      };
+    });
+  }
+
   async getHostelById(id: number): Promise<Hostel> {
     const hostel = await this.hostelRepository.findOne({ where: { id } });
     if (!hostel) {

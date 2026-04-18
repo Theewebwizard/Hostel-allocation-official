@@ -24,7 +24,9 @@ import {
   SwapHistory,
   WingParticipationSetting,
   SystemSetting,
+  RoommateInvitation,
 } from './entities';
+import { RoommateInvitationsModule } from './roommate-invitations/roommate-invitations.module';
 
 @Module({
   imports: [
@@ -55,6 +57,7 @@ import {
           SwapHistory,
           WingParticipationSetting,
           SystemSetting,
+          RoommateInvitation,
         ],
         synchronize: configService.get('NODE_ENV') === 'development', // Auto-sync in dev only
       }),
@@ -66,6 +69,7 @@ import {
     AdminModule,
     AllocationDataModule,
     SwapsModule,
+    RoommateInvitationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

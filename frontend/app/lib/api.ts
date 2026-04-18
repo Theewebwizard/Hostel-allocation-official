@@ -98,6 +98,7 @@ export const studentsApi = {
       gender?: string;
     },
   ) => api.patch(`/students/${userId}`, data),
+  getEligibleForSwap: () => api.get<Student[]>("/students/eligible-for-swap"),
 };
 
 // Groups API
@@ -307,6 +308,7 @@ export const adminApi = {
 
   // Groups for Admin
   getAllGroups: () => api.get<any[]>("/admin/groups"),
+  getHostelHierarchy: () => api.get<any[]>("/admin/hostels/hierarchy"),
 };
 
 export const allocationApi = {
@@ -412,4 +414,30 @@ export const swapsApi = {
     api.post<SwapHistory[]>("/swaps/admin/execute-chain", { swapRequestIds }),
 
   getAllHistory: () => api.get<SwapHistory[]>("/swaps/admin/history"),
+};
+
+// Roommate Invitation API
+export interface RoommateInvitation {
+  id: number;
+  senderId: string;
+  receiverId: string;
+  groupId: number;
+  status: "pending" | "accepted" | "rejected" | "cancelled";
+  createdAt: string;
+  sender?: { fullName: string; rollNumber: string };
+  receiver?: { fullName: string; rollNumber: string };
+  group?: { name: string };
+}
+
+export const roommateInvitationsApi = {
+  sendInvitation: (receiverRollNumber: string) =>
+    api.post<RoommateInvitation>("/roommate-invitations/send", {
+      receiverRollNumber,
+    }),
+  respondToInvitation: (id: number, status: "accepted" | "rejected") =>
+    api.post<RoommateInvitation>(`/roommate-invitations/${id}/respond`, {
+      status,
+    }),
+  getMyInvitations: () =>
+    api.get<RoommateInvitation[]>("/roommate-invitations/my"),
 };

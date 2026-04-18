@@ -10,6 +10,8 @@ import {
   Room,
   AllocationResult,
   AllocationRule,
+  RoommateInvitation,
+  RoommateInvitationStatus,
 } from '../entities';
 
 @Injectable()
@@ -27,6 +29,8 @@ export class AllocationDataService {
     private allocationResultRepository: Repository<AllocationResult>,
     @InjectRepository(AllocationRule)
     private ruleRepository: Repository<AllocationRule>,
+    @InjectRepository(RoommateInvitation)
+    private roommateInvitationRepository: Repository<RoommateInvitation>,
   ) {}
 
   async getAllStudents() {
@@ -90,12 +94,14 @@ export class AllocationDataService {
   }
 
   async getAllData() {
-    const [students, groups, hostels, rooms, rules] = await Promise.all([
+    const [students, groups, hostels, rooms, rules, roommateInvitations] =
+      await Promise.all([
       this.getAllStudents(),
       this.getAllGroups(),
       this.getAllHostels(),
       this.getAllRooms(),
       this.getAllRules(),
+      this.getAllRoommateInvitations(),
     ]);
 
     return {
@@ -104,12 +110,19 @@ export class AllocationDataService {
       hostels,
       rooms,
       rules,
+      roommateInvitations,
     };
   }
 
   async getAllRules() {
     return this.ruleRepository.find({
       order: { priority: 'DESC', id: 'ASC' },
+    });
+  }
+
+  async getAllRoommateInvitations() {
+    return this.roommateInvitationRepository.find({
+      where: { status: RoommateInvitationStatus.ACCEPTED },
     });
   }
 

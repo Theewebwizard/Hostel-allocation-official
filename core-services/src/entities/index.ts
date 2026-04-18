@@ -20,3 +20,4 @@ export {
 export { SwapHistory, SwapExecutionType } from './swap-history.entity';
 export { WingParticipationSetting } from './wing-participation-setting.entity';
 export { SystemSetting } from './system-setting.entity';
+export { RoommateInvitation, RoommateInvitationStatus } from './roommate-invitation.entity';

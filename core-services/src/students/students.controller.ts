@@ -39,6 +39,13 @@ export class StudentsController {
     return this.studentsService.findOne(req.user.id);
   }
 
+  @Get('eligible-for-swap')
+  @ApiOperation({ summary: 'Get students eligible for room swap' })
+  @ApiResponse({ status: 200, description: 'List of eligible students' })
+  findEligibleForSwap(@Request() req) {
+    return this.studentsService.findEligibleForSwap(req.user.id);
+  }
+
   @Get('roll/:rollNumber')
   @ApiOperation({ summary: 'Find student by roll number' })
   @ApiResponse({ status: 200, description: 'Student found' })

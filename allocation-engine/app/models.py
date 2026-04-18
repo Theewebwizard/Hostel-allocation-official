@@ -63,10 +63,19 @@ class AllocationRule(BaseModel):
     priority: int = 0
 
 
+class RoommateInvitation(BaseModel):
+    id: int
+    sender_id: str
+    receiver_id: str
+    group_id: int
+    status: str = "accepted"
+
+
 class AllocationRequest(BaseModel):
     allocation_run_id: Optional[str] = None
     rules: List[AllocationRule]
     allocation_mode: str = "group_based"  # "group_based", "fcfs", or "wing_fcfs"
+    roommate_invitations: List[RoommateInvitation] = []
 
 
 class AllocationResult(BaseModel):

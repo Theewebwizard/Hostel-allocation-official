@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not, IsNull } from 'typeorm';
 import { Student } from '../entities';
 import { UpdateStudentDto } from './dto/update-student.dto';
 
@@ -41,6 +41,19 @@ export class StudentsService {
     }
 
     return student;
+  }
+
+  async findEligibleForSwap(userId: string) {
+    const requester = await this.findOne(userId);
+
+    return this.studentRepository.find({
+      where: {
+        gender: requester.gender,
+        currentRoomId: Not(IsNull()),
+        userId: Not(userId),
+      },
+      relations: ['currentRoom', 'currentRoom.hostel'],
+    });
   }
 
   async update(userId: string, updateStudentDto: UpdateStudentDto) {

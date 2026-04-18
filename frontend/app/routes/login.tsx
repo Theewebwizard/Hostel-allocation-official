@@ -72,23 +72,23 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-600 mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900">
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
             Hostel Allocation
           </h1>
-          <p className="text-slate-600 mt-2 font-medium">
+          <p className="text-slate-600 dark:text-slate-400 mt-2 font-medium">
             Intelligent Room Management System
           </p>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-slate-900 text-2xl">Welcome Back</CardTitle>
-            <CardDescription className="text-slate-600 font-medium">Sign in to your account</CardDescription>
+            <CardTitle className="text-slate-900 dark:text-white text-2xl">Welcome Back</CardTitle>
+            <CardDescription className="text-slate-600 dark:text-slate-400 font-medium">Sign in to your account</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
-                <div className="p-3 rounded-lg bg-red-50 text-red-600 text-sm">
+                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm">
                   {error}
                 </div>
               )}
@@ -100,7 +100,7 @@ export default function LoginPage() {
                   placeholder="Email address"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 dark:bg-slate-900 dark:text-white"
                   required
                 />
               </div>
@@ -112,7 +112,7 @@ export default function LoginPage() {
                   placeholder="Password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 dark:bg-slate-900 dark:text-white"
                   required
                 />
               </div>
@@ -126,11 +126,11 @@ export default function LoginPage() {
                 Sign In
               </Button>
 
-              <p className="text-center text-sm text-slate-600 font-medium">
+              <p className="text-center text-sm text-slate-600 dark:text-slate-400 font-medium">
                 Don't have an account?{" "}
                 <Link
                   to="/register"
-                  className="text-indigo-600 hover:text-indigo-800 underline font-bold"
+                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 underline font-bold"
                 >
                   Register here
                 </Link>

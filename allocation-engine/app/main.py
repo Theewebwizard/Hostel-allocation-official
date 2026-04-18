@@ -48,7 +48,7 @@ async def fetch_data_from_core_services():
             data = response.json()
 
             # Transform the data to match the expected format
-            from .models import Student, Group, Hostel, Room, GenderType, RoomStatus
+            from .models import Student, Group, Hostel, Room, GenderType, RoomStatus, RoommateInvitation
 
             students = [
                 Student(
@@ -107,11 +107,23 @@ async def fetch_data_from_core_services():
                 for r in data.get('rooms', [])
             ]
 
+            roommate_invitations = [
+                RoommateInvitation(
+                    id=ri['id'],
+                    sender_id=ri['senderId'],
+                    receiver_id=ri['receiverId'],
+                    group_id=ri['groupId'],
+                    status=ri.get('status', 'accepted')
+                )
+                for ri in data.get('roommateInvitations', [])
+            ]
+
             return {
                 "students": students,
                 "groups": groups,
                 "hostels": hostels,
-                "rooms": rooms
+                "rooms": rooms,
+                "roommate_invitations": roommate_invitations
             }
         except httpx.RequestError as e:
             raise HTTPException(status_code=503, detail=f"Core services unavailable: {str(e)}")
@@ -133,7 +145,8 @@ async def run_allocation_task(run_id: str, rules: list, allocation_mode: str = "
             groups=data["groups"],
             hostels=data["hostels"],
             rooms=data["rooms"],
-            rules=rules
+            rules=rules,
+            roommate_invitations=data["roommate_invitations"]
         )
 
         results = engine.run_allocation(mode=allocation_mode)
