@@ -1,6 +1,7 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, Query, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AllocationDataService } from './allocation-data.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('allocation-data')
 @Controller('allocation-data')
@@ -50,5 +51,14 @@ export class AllocationDataController {
   })
   async getAllocationResults(@Query('runId') runId?: string) {
     return this.allocationDataService.getAllocationResults(runId);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current student allocation result' })
+  @ApiResponse({ status: 200, description: 'Result retrieved successfully' })
+  async getMyResult(@Request() req) {
+    return this.allocationDataService.getStudentResult(req.user.id);
   }
 }

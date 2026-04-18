@@ -12,6 +12,7 @@ import {
   UserPlus,
   ArrowLeftRight,
   AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { useAuthStore } from "~/lib/auth-store";
 import { adminApi, type AllocationPolicy } from "~/lib/api";
@@ -63,6 +64,12 @@ export function DashboardLayout({ children }: SidebarProps) {
       href: "/swaps",
       icon: ArrowLeftRight,
       label: "Room Swaps",
+      alwaysShow: true,
+    },
+    {
+      href: "/allocation-result",
+      icon: CheckCircle,
+      label: "Allocation Result",
       alwaysShow: true,
     },
     {

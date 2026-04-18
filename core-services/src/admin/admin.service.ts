@@ -518,6 +518,19 @@ export class AdminService {
         .whereInIds(roomIds)
         .execute();
 
+      // 4. Update student currentRoomId and allocatedRoomId
+      // We do this in a loop for each result to ensure each student gets their specific room
+      for (const res of results) {
+        await manager.update(
+          Student,
+          { userId: res.studentId },
+          {
+            currentRoomId: res.roomId,
+            allocatedRoomId: res.roomId,
+          },
+        );
+      }
+
       return {
         message: 'Allocation run committed successfully',
         count: roomIds.length,

@@ -20,7 +20,7 @@ export class StudentsService {
   async findOne(userId: string) {
     const student = await this.studentRepository.findOne({
       where: { userId },
-      relations: ['user'],
+      relations: ['user', 'currentRoom', 'currentRoom.hostel'],
     });
 
     if (!student) {

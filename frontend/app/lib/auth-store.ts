@@ -10,6 +10,7 @@ interface User {
     fullName: string;
     year: number;
     program: string;
+    gender?: "male" | "female";
   };
 }
 

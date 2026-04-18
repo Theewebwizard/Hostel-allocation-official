@@ -145,4 +145,30 @@ export class AllocationDataService {
       order: { createdAt: 'DESC' },
     });
   }
+
+  async getStudentResult(userId: string) {
+    const result = await this.allocationResultRepository.findOne({
+      where: { studentId: userId },
+      relations: ['room', 'room.hostel'],
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!result) return null;
+
+    // Find neighbors (same wing or same room)
+    const neighbors = await this.allocationResultRepository.find({
+      where: {
+        runId: result.runId,
+        hostelName: result.hostelName,
+        wing: result.wing,
+        floor: result.floor,
+      },
+      relations: ['student'],
+    });
+
+    return {
+      result,
+      neighbors: neighbors.filter((n) => n.studentId !== userId),
+    };
+  }
 }

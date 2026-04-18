@@ -64,6 +64,7 @@ export interface AuthResponse {
       fullName: string;
       year: number;
       program: string;
+      gender?: "male" | "female";
     };
   };
 }
@@ -185,6 +186,7 @@ export interface AllocationRun {
 
 export interface AllocationResult {
   id: number;
+  runId: string;
   studentId: string;
   roomId: number;
   hostelName: string;
@@ -193,6 +195,14 @@ export interface AllocationResult {
   floor?: number;
   groupId?: number;
   happiness: number;
+  createdAt: string;
+  room?: Room;
+  student?: {
+    fullName: string;
+    rollNumber: string;
+    year: number;
+    program: string;
+  };
 }
 
 export interface WingParticipationSetting {
@@ -297,6 +307,13 @@ export const adminApi = {
 
   // Groups for Admin
   getAllGroups: () => api.get<any[]>("/admin/groups"),
+};
+
+export const allocationApi = {
+  getMyAllocationResult: () =>
+    api.get<{ result: AllocationResult; neighbors: AllocationResult[] }>(
+      "/allocation-data/me",
+    ),
 };
 
 // Swap System API
