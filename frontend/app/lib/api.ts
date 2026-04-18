@@ -53,19 +53,23 @@ export interface RegisterDto {
   program?: string;
 }
 
+export interface Student {
+  userId: string;
+  rollNumber: string;
+  fullName: string;
+  year: number;
+  program: string;
+  gender?: "male" | "female";
+  applicationTimestamp?: string;
+}
+
 export interface AuthResponse {
   accessToken: string;
   user: {
     id: string;
     email: string;
     role: "student" | "warden";
-    student?: {
-      rollNumber: string;
-      fullName: string;
-      year: number;
-      program: string;
-      gender?: "male" | "female";
-    };
+    student?: Student;
   };
 }
 
@@ -99,6 +103,7 @@ export const studentsApi = {
     },
   ) => api.patch(`/students/${userId}`, data),
   getEligibleForSwap: () => api.get<Student[]>("/students/eligible-for-swap"),
+  submitApplication: () => api.post("/students/me/apply"),
 };
 
 // Groups API

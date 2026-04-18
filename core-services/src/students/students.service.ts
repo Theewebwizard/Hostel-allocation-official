@@ -62,4 +62,10 @@ export class StudentsService {
     Object.assign(student, updateStudentDto);
     return this.studentRepository.save(student);
   }
+
+  async apply(userId: string) {
+    return this.studentRepository.update(userId, {
+      applicationTimestamp: new Date(),
+    });
+  }
 }

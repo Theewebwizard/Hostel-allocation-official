@@ -6,6 +6,7 @@ import {
   Param,
   UseGuards,
   Request,
+  Post,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -59,6 +60,13 @@ export class StudentsController {
   @ApiResponse({ status: 200, description: 'Profile updated successfully' })
   update(@Request() req, @Body() updateStudentDto: UpdateStudentDto) {
     return this.studentsService.update(req.user.id, updateStudentDto);
+  }
+
+  @Post('me/apply')
+  @ApiOperation({ summary: 'Submit hostel application' })
+  @ApiResponse({ status: 201, description: 'Application submitted' })
+  apply(@Request() req) {
+    return this.studentsService.apply(req.user.id);
   }
 
   @Patch(':userId')

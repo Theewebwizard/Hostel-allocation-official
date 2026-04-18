@@ -36,7 +36,7 @@ export class Student {
   @Column({ nullable: true })
   program: string;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ type: 'timestamp', nullable: true })
   applicationTimestamp: Date;
 
   // Room assigned during initial allocation

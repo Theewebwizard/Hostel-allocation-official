@@ -13,7 +13,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { DashboardLayout } from "~/components/layout/DashboardLayout";
-import { Card, CardHeader, CardTitle, CardContent } from "~/components/ui";
+import {
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from "~/components/ui";
 import { useAuthStore } from "~/lib/auth-store";
 import { adminApi, groupsApi, studentsApi, type DashboardStats } from "~/lib/api";
 
@@ -53,11 +59,36 @@ function StatCard({
 }
 
 function StudentDashboard() {
-  const { user } = useAuthStore();
+  const { user, checkAuth } = useAuthStore();
   const student = user?.student;
   const [groupCount, setGroupCount] = useState<number>(0);
   const [invitationCount, setInvitationCount] = useState<number>(0);
   const [currentRoom, setCurrentRoom] = useState<any>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  const handleApply = async () => {
+    if (
+      !confirm(
+        "Are you ready to submit your official hostel application? Your timestamp will be recorded now.",
+      )
+    )
+      return;
+    setIsSubmitting(true);
+    setSubmitError("");
+    try {
+      await studentsApi.submitApplication();
+      await checkAuth(); // Refresh user data to get the new timestamp
+    } catch (err: any) {
+      setSubmitError(
+        err.response?.data?.message || "Failed to submit application",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const hasApplied = !!student?.applicationTimestamp;
 
   useEffect(() => {
     const fetchStudentData = async () => {
@@ -67,12 +98,12 @@ function StudentDashboard() {
           groupsApi.getMyInvitations(),
           studentsApi.getMe(),
         ]);
-        
+
         if (groupRes.data) {
           setGroupCount(groupRes.data.memberCount || 0);
         }
         setInvitationCount(invitationsRes.data?.length || 0);
-        
+
         if (meRes.data?.currentRoom) {
           setCurrentRoom(meRes.data.currentRoom);
         }
@@ -86,13 +117,49 @@ function StudentDashboard() {
 
   return (
     <>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900">
-          Welcome, {student?.fullName || "Student"}! 👋
-        </h1>
-        <p className="text-slate-600 mt-1">
-          Here's an overview of your hostel allocation status
-        </p>
+      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">
+            Welcome, {student?.fullName || "Student"}! 👋
+          </h1>
+          <p className="text-slate-600 mt-1">
+            Here's an overview of your hostel allocation status
+          </p>
+        </div>
+
+        {/* Application Submission Status */}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 min-w-[280px]">
+          {hasApplied ? (
+            <div className="flex items-center gap-3 text-green-700">
+              <CheckCircle className="w-8 h-8" />
+              <div>
+                <p className="font-bold">Application Submitted</p>
+                <p className="text-xs text-slate-600">
+                  Recorded:{" "}
+                  {new Date(student.applicationTimestamp!).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium text-amber-600 flex items-center gap-1">
+                <Clock className="w-4 h-4" />
+                Hostel application not submitted yet!
+              </p>
+              <Button
+                onClick={handleApply}
+                disabled={isSubmitting}
+                className="w-full"
+                size="sm"
+              >
+                {isSubmitting ? "Submitting..." : "Submit Application Now"}
+              </Button>
+              {submitError && (
+                <p className="text-xs text-red-500 mt-1">{submitError}</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Stats Grid */}

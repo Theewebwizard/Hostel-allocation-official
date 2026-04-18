@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull, Not } from 'typeorm';
 import {
   Student,
   Group,
@@ -35,6 +35,9 @@ export class AllocationDataService {
 
   async getAllStudents() {
     return this.studentRepository.find({
+      where: {
+        applicationTimestamp: Not(IsNull()),
+      },
       select: [
         'userId',
         'rollNumber',
@@ -53,13 +56,13 @@ export class AllocationDataService {
       relations: ['memberships', 'memberships.student'],
     });
 
-    // Transform to include only accepted members
+    // Transform to include only accepted members who have also applied
     return groups.map((group) => ({
       id: group.id,
       name: group.name,
       creatorId: group.creatorId,
       members: group.memberships
-        .filter((m) => m.status === MembershipStatus.ACCEPTED)
+        .filter((m) => m.status === MembershipStatus.ACCEPTED && m.student.applicationTimestamp !== null)
         .map((m) => ({
           userId: m.student.userId,
           rollNumber: m.student.rollNumber,
