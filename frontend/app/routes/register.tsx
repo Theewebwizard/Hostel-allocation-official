@@ -122,16 +122,16 @@ export default function RegisterPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-600 mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">
+          <h1 className="text-3xl font-bold text-slate-900">
             Hostel Allocation
           </h1>
-          <p className="text-gray-600 mt-2">Create your account</p>
+          <p className="text-slate-600 mt-2 font-medium">Create your account</p>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Register</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-slate-900 text-2xl">Register</CardTitle>
+            <CardDescription className="text-slate-600 font-medium">
               Fill in your details to get started
             </CardDescription>
           </CardHeader>
@@ -145,11 +145,11 @@ export default function RegisterPage() {
 
               {/* Role Selection */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-bold text-slate-700 mb-2">
                   I am a
                 </label>
                 <div className="flex gap-4">
-                  <label className="flex items-center">
+                  <label className="flex items-center text-slate-700 font-medium cursor-pointer">
                     <input
                       type="radio"
                       name="role"
@@ -160,7 +160,7 @@ export default function RegisterPage() {
                     />
                     Student
                   </label>
-                  <label className="flex items-center">
+                  <label className="flex items-center text-slate-700 font-medium cursor-pointer">
                     <input
                       type="radio"
                       name="role"
@@ -234,7 +234,7 @@ export default function RegisterPage() {
                       name="gender"
                       value={formData.gender}
                       onChange={handleChange}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white text-slate-900 font-medium"
                       required
                     >
                       <option value="male">Male</option>
@@ -262,7 +262,7 @@ export default function RegisterPage() {
                         name="year"
                         value={formData.year}
                         onChange={handleChange}
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white text-slate-900 font-medium"
                         required
                       >
                         <option value={1}>1st Year</option>
@@ -278,7 +278,7 @@ export default function RegisterPage() {
                         name="program"
                         value={formData.program}
                         onChange={handleChange}
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white text-slate-900 font-medium"
                         required
                       >
                         <option value="">Select Program</option>
@@ -303,11 +303,11 @@ export default function RegisterPage() {
                 Create Account
               </Button>
 
-              <p className="text-center text-sm text-gray-600">
+               <p className="text-center text-sm text-slate-600 font-medium">
                 Already have an account?{" "}
                 <Link
                   to="/login"
-                  className="text-indigo-600 hover:underline font-medium"
+                  className="text-indigo-600 hover:text-indigo-800 underline font-bold"
                 >
                   Sign in
                 </Link>

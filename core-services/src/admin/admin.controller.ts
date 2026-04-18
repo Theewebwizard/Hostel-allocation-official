@@ -17,6 +17,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
+import { AllocationDataService } from '../allocation-data/allocation-data.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import {
   CreateHostelDto,
@@ -29,6 +30,7 @@ import {
   TriggerAllocationDto,
   UpdateAllocationResultDto,
   SetWingParticipationDto,
+  SetAllocationPolicyDto,
 } from './dto/admin.dto';
 
 @ApiTags('admin')
@@ -36,7 +38,10 @@ import {
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly allocationDataService: AllocationDataService,
+  ) {}
 
   // ============ DASHBOARD ============
 
@@ -220,6 +225,14 @@ export class AdminController {
     return this.adminService.finalizeAllocationRun(id);
   }
 
+  @Post('allocation/runs/:id/commit')
+  @ApiOperation({ summary: 'Commit an allocation run to update room status' })
+  @ApiResponse({ status: 200, description: 'Allocation run committed' })
+  @ApiResponse({ status: 400, description: 'Cannot commit this run' })
+  async commitAllocationRun(@Param('id') id: string) {
+    return this.adminService.commitAllocationRun(id);
+  }
+
   @Patch('allocation/results/:id')
   @ApiOperation({ summary: 'Update allocation result (manual override)' })
   @ApiResponse({ status: 200, description: 'Allocation result updated' })
@@ -251,5 +264,30 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Wing participation settings' })
   async getWingParticipationSettings() {
     return this.adminService.getWingParticipationSettings();
+  }
+
+  // ============ ALLOCATION POLICY ============
+
+  @Get('policy')
+  @UseGuards() // Intentionally overrides class-level JwtAuthGuard — public endpoint
+  @ApiOperation({ summary: 'Get the active allocation policy (public)' })
+  @ApiResponse({ status: 200, description: 'Current allocation policy' })
+  async getAllocationPolicy() {
+    const policy = await this.adminService.getAllocationPolicy();
+    return { policy };
+  }
+
+  @Post('policy')
+  @ApiOperation({ summary: 'Set the active allocation policy (admin only)' })
+  @ApiResponse({ status: 200, description: 'Policy updated' })
+  async setAllocationPolicy(@Body() dto: SetAllocationPolicyDto) {
+    return this.adminService.setAllocationPolicy(dto.policy);
+  }
+
+  @Get('groups')
+  @ApiOperation({ summary: 'Get all groups for auditing (admin only)' })
+  @ApiResponse({ status: 200, description: 'Groups retrieved successfully' })
+  async getAllGroups() {
+    return this.allocationDataService.getAllGroups();
   }
 }

@@ -23,6 +23,7 @@ import {
   SwapRequest,
   SwapHistory,
   WingParticipationSetting,
+  SystemSetting,
 } from './entities';
 
 @Module({
@@ -53,6 +54,7 @@ import {
           SwapRequest,
           SwapHistory,
           WingParticipationSetting,
+          SystemSetting,
         ],
         synchronize: configService.get('NODE_ENV') === 'development', // Auto-sync in dev only
       }),

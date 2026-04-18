@@ -201,6 +201,8 @@ export interface WingParticipationSetting {
   isAllowed: boolean;
 }
 
+export type AllocationPolicy = "group_based" | "fcfs" | "wing_fcfs";
+
 export interface DashboardStats {
   totalStudents: number;
   totalGroups: number;
@@ -272,7 +274,9 @@ export const adminApi = {
   getAllocationResults: (runId: string) =>
     api.get<AllocationResult[]>(`/admin/allocation/runs/${runId}/results`),
   finalizeAllocationRun: (id: string) =>
-    api.post<AllocationRun>(`/admin/allocation/runs/${id}/finalize`),
+    api.post(`/admin/allocation/runs/${id}/finalize`),
+  commitAllocationRun: (id: string) =>
+    api.post(`/admin/allocation/runs/${id}/commit`),
   updateAllocationResult: (id: number, roomId: number) =>
     api.patch<AllocationResult>(`/admin/allocation/results/${id}`, { roomId }),
 
@@ -284,6 +288,15 @@ export const adminApi = {
     }),
   getWingParticipationSettings: () =>
     api.get<WingParticipationSetting[]>("/admin/wing-participation"),
+
+  // Allocation Policy
+  getAllocationPolicy: () =>
+    api.get<{ policy: AllocationPolicy }>("/admin/policy"),
+  setAllocationPolicy: (policy: AllocationPolicy) =>
+    api.post<{ policy: AllocationPolicy }>("/admin/policy", { policy }),
+
+  // Groups for Admin
+  getAllGroups: () => api.get<any[]>("/admin/groups"),
 };
 
 // Swap System API

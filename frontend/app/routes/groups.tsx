@@ -211,10 +211,11 @@ export default function GroupsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="p-8">
+        <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">My Group</h1>
-          <p className="text-gray-600">
+          <h1 className="text-2xl font-bold text-slate-900">My Group</h1>
+          <p className="text-slate-600">
             Create or join a group to be allocated with your friends
           </p>
         </div>
@@ -248,11 +249,11 @@ export default function GroupsPage() {
                 {invitations.map((inv) => (
                   <div
                     key={inv.groupId}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100"
                   >
                     <div>
-                      <p className="font-medium">{inv.groupName}</p>
-                      <p className="text-sm text-gray-500">
+                      <p className="font-bold text-slate-900">{inv.groupName}</p>
+                      <p className="text-sm text-slate-500">
                         Invited by {inv.invitedBy}
                       </p>
                     </div>
@@ -290,11 +291,11 @@ export default function GroupsPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Users className="w-5 h-5" />
+                  <CardTitle className="flex items-center gap-2 text-slate-900">
+                    <Users className="w-5 h-5 text-indigo-600" />
                     {myGroup.name}
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-slate-500">
                     {myGroup.memberCount} member
                     {myGroup.memberCount !== 1 ? "s" : ""}
                   </CardDescription>
@@ -325,27 +326,27 @@ export default function GroupsPage() {
             <CardContent className="space-y-6">
               {/* Members List */}
               <div>
-                <h3 className="font-medium mb-3">Members</h3>
+                <h3 className="font-bold text-slate-900 mb-3">Members</h3>
                 <div className="space-y-2">
                   {myGroup.members.map((member) => (
                     <div
                       key={member.userId}
-                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                      className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
-                          <span className="text-indigo-600 font-medium">
+                        <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-200">
+                          <span className="text-indigo-700 font-bold">
                             {member.fullName.charAt(0)}
                           </span>
                         </div>
                         <div>
-                          <p className="font-medium flex items-center gap-2">
+                          <p className="font-bold text-slate-900 flex items-center gap-2">
                             {member.fullName}
                             {member.userId === myGroup.creatorId && (
-                              <Crown className="w-4 h-4 text-yellow-500" />
+                              <Crown className="w-4 h-4 text-amber-500" />
                             )}
                           </p>
-                          <p className="text-sm text-gray-500">
+                          <p className="text-sm text-slate-500 font-medium">
                             {member.rollNumber}
                           </p>
                         </div>
@@ -377,7 +378,7 @@ export default function GroupsPage() {
               {/* Invite Form (only for creator) */}
               {isCreator && (
                 <div>
-                  <h3 className="font-medium mb-3">Invite Member</h3>
+                  <h3 className="font-bold text-slate-900 mb-3">Invite Member</h3>
                   <form onSubmit={handleInvite} className="flex gap-2">
                     <div className="flex-1 relative">
                       <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -400,11 +401,11 @@ export default function GroupsPage() {
         ) : (
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="w-5 h-5" />
+              <CardTitle className="flex items-center gap-2 text-slate-900">
+                <Users className="w-5 h-5 text-indigo-600" />
                 Create a Group
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-slate-500">
                 Start a group to get allocated with your friends
               </CardDescription>
             </CardHeader>
@@ -427,6 +428,7 @@ export default function GroupsPage() {
             </CardContent>
           </Card>
         )}
+        </div>
       </div>
     </DashboardLayout>
   );

@@ -14,7 +14,7 @@ export class CreateHostelDto {
   @ApiProperty({ example: 'BH-1', description: 'Hostel name' })
   @IsNotEmpty()
   @IsString()
-  name: string;
+  name!: string;
 
   @ApiProperty({
     example: 'male',
@@ -22,7 +22,7 @@ export class CreateHostelDto {
     description: 'Gender type for this hostel',
   })
   @IsEnum(GenderType)
-  genderType: GenderType;
+  genderType!: GenderType;
 }
 
 export class UpdateHostelDto {
@@ -42,12 +42,12 @@ export class CreateRoomDto {
   @ApiProperty({ example: 1, description: 'Hostel ID' })
   @IsNotEmpty()
   @IsNumber()
-  hostelId: number;
+  hostelId!: number;
 
   @ApiProperty({ example: '101', description: 'Room number' })
   @IsNotEmpty()
   @IsString()
-  roomNumber: string;
+  roomNumber!: string;
 
   @ApiPropertyOptional({ example: 1, description: 'Floor number' })
   @IsOptional()
@@ -62,7 +62,7 @@ export class CreateRoomDto {
   @ApiProperty({ example: 2, description: 'Room capacity (beds)' })
   @IsNotEmpty()
   @IsNumber()
-  capacity: number;
+  capacity!: number;
 
   @ApiPropertyOptional({
     example: 'double',
@@ -142,7 +142,7 @@ export class CreateRuleDto {
     default: true,
   })
   @IsBoolean()
-  isAllowed: boolean;
+  isAllowed!: boolean;
 
   @ApiProperty({
     example: 0,
@@ -150,7 +150,7 @@ export class CreateRuleDto {
     default: 0,
   })
   @IsNumber()
-  priority: number;
+  priority!: number;
 
   @ApiPropertyOptional({
     example: '2nd year students in BH-4',
@@ -201,32 +201,32 @@ export class BulkCreateRoomsDto {
   @ApiProperty({ example: 1, description: 'Hostel ID' })
   @IsNotEmpty()
   @IsNumber()
-  hostelId: number;
+  hostelId!: number;
 
   @ApiProperty({ example: 'A', description: 'Wing name' })
   @IsNotEmpty()
   @IsString()
-  wing: string;
+  wing!: string;
 
   @ApiProperty({ example: 1, description: 'Floor number' })
   @IsNotEmpty()
   @IsNumber()
-  floor: number;
+  floor!: number;
 
   @ApiProperty({ example: 101, description: 'Starting room number' })
   @IsNotEmpty()
   @IsNumber()
-  startRoomNumber: number;
+  startRoomNumber!: number;
 
   @ApiProperty({ example: 10, description: 'Number of rooms to create' })
   @IsNotEmpty()
   @IsNumber()
-  count: number;
+  count!: number;
 
   @ApiProperty({ example: 2, description: 'Capacity per room' })
   @IsNotEmpty()
   @IsNumber()
-  capacity: number;
+  capacity!: number;
 
   @ApiPropertyOptional({ example: 'double', description: 'Room type' })
   @IsOptional()
@@ -251,7 +251,7 @@ export class UpdateAllocationResultDto {
   @ApiProperty({ example: 5, description: 'New room ID' })
   @IsNotEmpty()
   @IsNumber()
-  roomId: number;
+  roomId!: number;
 }
 
 // Wing Participation Settings DTO
@@ -259,10 +259,22 @@ export class SetWingParticipationDto {
   @ApiProperty({ example: 2, description: 'Academic year (1-4)' })
   @IsNotEmpty()
   @IsNumber()
-  year: number;
+  year!: number;
 
   @ApiProperty({ example: true, description: 'Allow wing participation' })
   @IsNotEmpty()
   @IsBoolean()
-  isAllowed: boolean;
+  isAllowed!: boolean;
+}
+
+// Allocation Policy DTO
+export class SetAllocationPolicyDto {
+  @ApiProperty({
+    example: 'group_based',
+    enum: AllocationMode,
+    description: 'Global allocation policy: group_based, fcfs, or wing_fcfs',
+  })
+  @IsNotEmpty()
+  @IsEnum(AllocationMode)
+  policy!: AllocationMode;
 }

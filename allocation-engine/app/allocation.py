@@ -246,7 +246,7 @@ class AllocationEngine:
     ) -> Optional[str]:
         """
         Stage 2: Find the best wing to place a group
-        Uses First-Fit Decreasing heuristic with eligibility checking
+        Uses First-Fit Decreasing heuristic with dynamic rule-based priority checking
         """
         if not group_members:
             return None
@@ -262,18 +262,42 @@ class AllocationEngine:
         if not eligible_wing_keys:
             return None
 
-        # Filter by capacity and sort by available beds (descending)
         available_wings = [
-            (wing_key, capacity)
+            wing_key
             for wing_key, capacity in state.wing_capacities.items()
             if wing_key in eligible_wing_keys and capacity >= group_size
         ]
-        available_wings.sort(key=lambda x: (-x[1], x[0]))  # Descending capacity, deterministic tie-breaking
 
-        if available_wings:
-            return available_wings[0][0]
+        if not available_wings:
+            return None
 
-        return None
+        # Determine group year (assuming all members are same year)
+        group_year = group_members[0].year if group_members else None
+
+        def wing_sort_key(wing_k):
+            wing = self.wings[wing_k]
+            cap = state.wing_capacities[wing_k]
+            
+            # Dynamically calculate priority from the rules engine
+            rule_priority = 0
+            if group_year is not None:
+                for rule in self.rules:
+                    # Look for ALLOWING rules that match this specific hostel, wing, and year
+                    if rule.is_allowed and \
+                       (rule.hostel_id is None or rule.hostel_id == wing.hostel_id) and \
+                       (rule.wing is None or rule.wing == wing.wing_name) and \
+                       (rule.year is None or rule.year == group_year):
+                        
+                        # Capture the highest priority among applicable rules
+                        if rule.priority > rule_priority:
+                            rule_priority = rule.priority
+            
+            # Sort by rule priority (highest first), then by capacity (highest first)
+            # We use negative values because Python's sort() is ascending by default
+            return (-rule_priority, -cap, wing_k)
+
+        available_wings.sort(key=wing_sort_key)
+        return available_wings[0]
     
     def _allocate_group_to_wing(
         self,
@@ -287,10 +311,18 @@ class AllocationEngine:
         results = []
         wing = self.wings[wing_key]
 
-        # Get available rooms in this wing sorted by capacity
+        # Get available rooms in this wing, sorted by floor and room number to ensure adjacency
+        def room_sort_key(r):
+            # Try to convert room_number to int for correct numeric sorting (10 after 2)
+            try:
+                num = int(''.join(filter(str.isdigit, r.room_number)))
+            except ValueError:
+                num = r.room_number
+            return (r.floor or 0, num)
+
         available_rooms = sorted(
             [r for r in wing.rooms if len(state.room_assignments.get(r.id, [])) < r.capacity],
-            key=lambda r: r.capacity - len(state.room_assignments.get(r.id, []))
+            key=room_sort_key
         )
 
         members_to_allocate = list(group_members)

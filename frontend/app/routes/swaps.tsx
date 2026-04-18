@@ -186,11 +186,12 @@ export default function SwapsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="p-8">
+        <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Room Swaps</h1>
-            <p className="text-gray-600">
+            <h1 className="text-2xl font-bold text-slate-900">Room Swaps</h1>
+            <p className="text-slate-600">
               Request to swap rooms with another student
             </p>
           </div>
@@ -229,13 +230,13 @@ export default function SwapsPage() {
                   <ArrowLeftRight className="w-6 h-6 text-indigo-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-indigo-600 font-medium">
+                  <p className="text-sm text-indigo-700 font-bold">
                     Your Current Room
                   </p>
                   <p className="text-lg font-bold text-indigo-900">
                     Room {studentInfo.currentRoom?.roomNumber || "N/A"}
                   </p>
-                  <p className="text-sm text-indigo-700">
+                  <p className="text-sm text-indigo-800 font-medium">
                     {studentInfo.currentRoom?.hostel?.name || ""}
                     {studentInfo.currentRoom?.wing &&
                       ` - Wing ${studentInfo.currentRoom.wing}`}
@@ -252,11 +253,11 @@ export default function SwapsPage() {
         {incomingRequests.length > 0 && (
           <Card className="border-yellow-200 bg-yellow-50">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-yellow-700">
+              <CardTitle className="flex items-center gap-2 text-amber-700">
                 <Clock className="w-5 h-5" />
                 Incoming Swap Requests ({incomingRequests.length})
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-amber-800 font-medium">
                 Other students want to swap rooms with you
               </CardDescription>
             </CardHeader>
@@ -265,17 +266,17 @@ export default function SwapsPage() {
                 {incomingRequests.map((req) => (
                   <div
                     key={req.id}
-                    className="p-4 bg-white rounded-lg border flex items-center justify-between"
+                    className="p-4 bg-white rounded-lg border border-amber-200 flex items-center justify-between shadow-sm"
                   >
                     <div>
-                      <p className="font-medium">{req.requesterName}</p>
-                      <p className="text-sm text-gray-500">
+                      <p className="font-bold text-slate-900">{req.requesterName}</p>
+                      <p className="text-sm text-slate-600 font-medium">
                         {req.requesterRollNumber} - Room{" "}
                         {req.requesterRoom.roomNumber} (
                         {req.requesterRoom.hostelName})
                       </p>
                       {req.reason && (
-                        <p className="text-sm text-gray-600 mt-1">
+                        <p className="text-sm text-slate-700 mt-1 italic font-medium">
                           Reason: {req.reason}
                         </p>
                       )}
@@ -311,20 +312,20 @@ export default function SwapsPage() {
         {/* Create Swap Request */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Send className="w-5 h-5" />
+            <CardTitle className="flex items-center gap-2 text-slate-900">
+              <Send className="w-5 h-5 text-indigo-600" />
               Request a Swap
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-slate-500">
               Send a swap request to another student
             </CardDescription>
           </CardHeader>
           <CardContent>
             {pendingRequest ? (
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <p className="text-gray-600 mb-2">
+              <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+                <p className="text-slate-700 mb-2 font-medium">
                   You already have a pending swap request to{" "}
-                  <span className="font-medium">
+                  <span className="font-bold text-slate-900">
                     {pendingRequest.targetStudentName || "Open Request"}
                   </span>
                 </p>
@@ -339,7 +340,7 @@ export default function SwapsPage() {
             ) : showCreateForm ? (
               <form onSubmit={handleCreateRequest} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-bold text-slate-700 mb-1">
                     Target Student Roll Number (optional for open request)
                   </label>
                   <Input
@@ -347,12 +348,12 @@ export default function SwapsPage() {
                     value={targetRollNumber}
                     onChange={(e) => setTargetRollNumber(e.target.value)}
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-slate-500 mt-1 font-medium">
                     Leave empty to create an open swap request visible to all
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-bold text-slate-700 mb-1">
                     Reason (optional)
                   </label>
                   <Input
@@ -400,24 +401,24 @@ export default function SwapsPage() {
         {/* My Swap Requests */}
         <Card>
           <CardHeader>
-            <CardTitle>My Swap Requests</CardTitle>
-            <CardDescription>Requests you have sent</CardDescription>
+            <CardTitle className="text-slate-900">My Swap Requests</CardTitle>
+            <CardDescription className="text-slate-500">Requests you have sent</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gray-50 border-b">
+                <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                    <th className="px-4 py-3 text-left text-sm font-bold text-slate-600">
                       Target
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                    <th className="px-4 py-3 text-left text-sm font-bold text-slate-600">
                       Status
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                    <th className="px-4 py-3 text-left text-sm font-bold text-slate-600">
                       Created
                     </th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">
+                    <th className="px-4 py-3 text-left text-sm font-bold text-slate-600">
                       Actions
                     </th>
                   </tr>
@@ -425,9 +426,9 @@ export default function SwapsPage() {
                 <tbody className="divide-y">
                   {myRequests.map((req) => (
                     <tr key={req.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 font-bold text-slate-900">
                         {req.targetStudentName || (
-                          <span className="text-gray-400">Open Request</span>
+                          <span className="text-slate-400 font-medium italic">Open Request</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -447,7 +448,7 @@ export default function SwapsPage() {
                           {req.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
+                      <td className="px-4 py-3 text-sm text-slate-600 font-medium">
                         {new Date(req.createdAt).toLocaleDateString()}
                       </td>
                       <td className="px-4 py-3">
@@ -478,11 +479,11 @@ export default function SwapsPage() {
         {/* Swap History */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <History className="w-5 h-5" />
+            <CardTitle className="flex items-center gap-2 text-slate-900">
+              <History className="w-5 h-5 text-indigo-600" />
               Swap History
             </CardTitle>
-            <CardDescription>Your completed room swaps</CardDescription>
+            <CardDescription className="text-slate-500">Your completed room swaps</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y">
@@ -493,15 +494,15 @@ export default function SwapsPage() {
                       <Check className="w-4 h-4 text-green-600" />
                     </div>
                     <div>
-                      <p className="font-medium">
+                      <p className="font-bold text-slate-900">
                         Moved from Room {hist.previousRoom?.roomNumber || "?"}{" "}
                         to Room {hist.newRoom?.roomNumber || "?"}
                       </p>
-                      <p className="text-sm text-gray-500">
+                      <p className="text-sm text-slate-600 font-medium">
                         {hist.previousRoom?.hostel?.name} →{" "}
                         {hist.newRoom?.hostel?.name}
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-xs text-slate-400 mt-1 font-medium italic">
                         {new Date(hist.executedAt).toLocaleString()}
                       </p>
                     </div>
@@ -517,6 +518,7 @@ export default function SwapsPage() {
             </div>
           </CardContent>
         </Card>
+        </div>
       </div>
     </DashboardLayout>
   );

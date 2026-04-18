@@ -9,6 +9,8 @@ import { Repository, DataSource } from 'typeorm';
 import {
   Hostel,
   Room,
+  RoomStatus,
+  RoomType,
   AllocationRule,
   AllocationRun,
   AllocationRunStatus,
@@ -19,6 +21,7 @@ import {
   MembershipStatus,
   Student,
   WingParticipationSetting,
+  SystemSetting,
 } from '../entities';
 import {
   CreateHostelDto,
@@ -53,6 +56,8 @@ export class AdminService {
     private studentRepository: Repository<Student>,
     @InjectRepository(WingParticipationSetting)
     private wingParticipationRepository: Repository<WingParticipationSetting>,
+    @InjectRepository(SystemSetting)
+    private systemSettingRepository: Repository<SystemSetting>,
     private configService: ConfigService,
     private decisionsService: DecisionsService,
     private dataSource: DataSource,
@@ -135,7 +140,7 @@ export class AdminService {
 
     const room = this.roomRepository.create({
       ...createRoomDto,
-      roomType: createRoomDto.roomType || 'double',
+      roomType: (createRoomDto.roomType as RoomType) || RoomType.DOUBLE,
     });
     return this.roomRepository.save(room);
   }
@@ -158,7 +163,7 @@ export class AdminService {
           wing: dto.wing,
           floor: dto.floor,
           capacity: dto.capacity,
-          roomType: dto.roomType || 'double',
+          roomType: (dto.roomType as RoomType) || RoomType.DOUBLE,
         });
         rooms.push(room);
       }
@@ -278,6 +283,7 @@ export class AdminService {
         roomType: r.roomType,
         isAllowed: r.isAllowed,
         priority: r.priority,
+        wing: r.wing,
       })),
     });
 
@@ -318,6 +324,7 @@ export class AdminService {
             room_type: r.roomType,
             is_allowed: r.isAllowed,
             priority: r.priority,
+            wing: r.wing,
           })),
         }),
       });
@@ -476,6 +483,46 @@ export class AdminService {
 
     run.finalized = true;
     return this.runRepository.save(run);
+  }
+
+  async commitAllocationRun(id: string): Promise<{ message: string; count: number }> {
+    return await this.dataSource.transaction(async (manager) => {
+      // 1. Fetch the run
+      const run = await manager.findOne(AllocationRun, { where: { id } });
+      if (!run) {
+        throw new NotFoundException('Allocation run not found');
+      }
+
+      // If not finalized, finalize it first
+      if (!run.finalized) {
+        if (run.status !== AllocationRunStatus.COMPLETED) {
+          throw new BadRequestException('Only completed allocation runs can be committed');
+        }
+        run.finalized = true;
+        await manager.save(AllocationRun, run);
+      }
+
+      // 2. Get all distinct rooms from allocation results
+      const results = await manager.find(AllocationResult, { where: { runId: id } });
+      const roomIds = [...new Set(results.map((r) => r.roomId))];
+
+      if (roomIds.length === 0) {
+        return { message: 'No rooms to commit', count: 0 };
+      }
+
+      // 3. Update all these rooms to occupied
+      await manager
+        .createQueryBuilder()
+        .update(Room)
+        .set({ status: RoomStatus.OCCUPIED })
+        .whereInIds(roomIds)
+        .execute();
+
+      return {
+        message: 'Allocation run committed successfully',
+        count: roomIds.length,
+      };
+    });
   }
 
   async getAllocationResults(runId: string): Promise<AllocationResult[]> {
@@ -643,5 +690,33 @@ export class AdminService {
       where: { year },
     });
     return setting ? setting.isAllowed : true;
+  }
+
+  // ============ SYSTEM SETTINGS (ALLOCATION POLICY) ============
+
+  async getAllocationPolicy(): Promise<string> {
+    const setting = await this.systemSettingRepository.findOne({
+      where: { key: 'allocationPolicy' },
+    });
+    return setting ? setting.value : 'group_based';
+  }
+
+  async setAllocationPolicy(policy: string): Promise<{ policy: string }> {
+    const existing = await this.systemSettingRepository.findOne({
+      where: { key: 'allocationPolicy' },
+    });
+
+    if (existing) {
+      existing.value = policy;
+      await this.systemSettingRepository.save(existing);
+    } else {
+      const setting = this.systemSettingRepository.create({
+        key: 'allocationPolicy',
+        value: policy,
+      });
+      await this.systemSettingRepository.save(setting);
+    }
+
+    return { policy };
   }
 }

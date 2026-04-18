@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { DecisionsModule } from '../decisions/decisions.module';
+import { AllocationDataModule } from '../allocation-data/allocation-data.module';
 import {
   Hostel,
   Room,
@@ -13,6 +14,7 @@ import {
   GroupMembership,
   Student,
   WingParticipationSetting,
+  SystemSetting,
 } from '../entities';
 
 @Module({
@@ -27,8 +29,10 @@ import {
       GroupMembership,
       Student,
       WingParticipationSetting,
+      SystemSetting,
     ]),
     DecisionsModule,
+    AllocationDataModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

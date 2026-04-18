@@ -72,18 +72,18 @@ export default function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-600 mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">
+          <h1 className="text-3xl font-bold text-slate-900">
             Hostel Allocation
           </h1>
-          <p className="text-gray-600 mt-2">
+          <p className="text-slate-600 mt-2 font-medium">
             Intelligent Room Management System
           </p>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Welcome Back</CardTitle>
-            <CardDescription>Sign in to your account</CardDescription>
+            <CardTitle className="text-slate-900 text-2xl">Welcome Back</CardTitle>
+            <CardDescription className="text-slate-600 font-medium">Sign in to your account</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -126,11 +126,11 @@ export default function LoginPage() {
                 Sign In
               </Button>
 
-              <p className="text-center text-sm text-gray-600">
+              <p className="text-center text-sm text-slate-600 font-medium">
                 Don't have an account?{" "}
                 <Link
                   to="/register"
-                  className="text-indigo-600 hover:underline font-medium"
+                  className="text-indigo-600 hover:text-indigo-800 underline font-bold"
                 >
                   Register here
                 </Link>

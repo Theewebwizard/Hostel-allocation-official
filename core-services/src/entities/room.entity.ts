@@ -10,6 +10,13 @@ import { Hostel } from './hostel.entity';
 export enum RoomStatus {
   AVAILABLE = 'available',
   MAINTENANCE = 'maintenance',
+  OCCUPIED = 'occupied',
+}
+
+export enum RoomType {
+  SINGLE = 'single',
+  DOUBLE = 'double',
+  TRIPLE = 'triple',
 }
 
 @Entity('rooms')
@@ -32,8 +39,12 @@ export class Room {
   @Column()
   capacity: number;
 
-  @Column({ default: 'double' })
-  roomType: string;
+  @Column({
+    type: 'enum',
+    enum: RoomType,
+    default: RoomType.DOUBLE,
+  })
+  roomType: RoomType;
 
   @Column({
     type: 'enum',
