@@ -20,11 +20,11 @@ export class AllocationRule {
   @Column({ nullable: true })
   year: number;
 
-  @Column({ nullable: true })
-  roomType: string;
+  @Column({ type: 'varchar', nullable: true })
+  roomType: string | null;
 
-  @Column({ nullable: true })
-  wing: string;
+  @Column({ type: 'varchar', nullable: true })
+  wing: string | null;
 
   @Column({ default: true })
   isAllowed: boolean;
@@ -32,8 +32,8 @@ export class AllocationRule {
   @Column({ default: 0 })
   priority: number;
 
-  @Column({ nullable: true })
-  description: string;
+  @Column({ type: 'varchar', nullable: true })
+  description: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

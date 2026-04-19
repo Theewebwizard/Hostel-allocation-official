@@ -6,6 +6,8 @@ import {
   IsNumber,
   IsBoolean,
   IsEnum,
+  IsArray,
+  IsInt,
 } from 'class-validator';
 import { GenderType, RoomStatus, AllocationMode } from '../../entities';
 
@@ -244,6 +246,26 @@ export class TriggerAllocationDto {
   @IsOptional()
   @IsEnum(AllocationMode)
   allocationMode?: AllocationMode;
+
+  @ApiPropertyOptional({
+    type: [Number],
+    example: [1, 2],
+    description: 'Target academic years to allocate (empty = all years)',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  targetYears?: number[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['CSE', 'ECE'],
+    description: 'Target programs to allocate (empty = all programs)',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  targetPrograms?: string[];
 }
 
 // Update Allocation Result DTO
@@ -277,4 +299,40 @@ export class SetAllocationPolicyDto {
   @IsNotEmpty()
   @IsEnum(AllocationMode)
   policy!: AllocationMode;
+}
+
+export class BulkEvictDto {
+  @ApiProperty({
+    type: [String],
+    example: ['2024CS01', '2024CS02'],
+    description: 'List of student roll numbers to evict',
+  })
+  @IsNotEmpty()
+  @IsArray()
+  @IsString({ each: true })
+  rollNumbers!: string[];
+}
+
+export class ResetStatusDto {
+  @ApiPropertyOptional({ example: 1, description: 'Academic year to reset (optional)' })
+  @IsOptional()
+  @IsNumber()
+  year?: number;
+}
+
+export class SaveRulesMatrixDto {
+  @ApiProperty({
+    example: {
+      1: {
+        years: { 1: true, 2: false },
+        wings: { 'A': { 1: true }, 'B': { 2: true } }
+      }
+    },
+    description: 'Hierarchical matrix of hostelId -> (years and wing-specific years)',
+  })
+  @IsNotEmpty()
+  matrix!: Record<number, {
+    years: Record<number, boolean>;
+    wings: Record<string, Record<number, boolean>>;
+  }>;
 }

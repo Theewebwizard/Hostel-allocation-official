@@ -30,6 +30,24 @@ def create_admin():
         session.headers.update({"Authorization": f"Bearer {admin_token}"})
         print("✅ Warden logged in.")
 
+def enable_applications():
+    print("\n🔓 Enabling student applications...")
+    res = session.post(f"{NEST_API}/admin/applications-enabled", json={"enabled": True})
+    if res.status_code in [200, 201]:
+        print("✅ Applications enabled.")
+    else:
+        print(f"   ⚠️ Failed to enable applications: {res.text}")
+
+def get_allocation_mode():
+    print("🔍 Checking current allocation mode...")
+    res = session.get(f"{NEST_API}/admin/policy")
+    if res.status_code == 200:
+        mode = res.json().get("policy")
+        print(f"✅ Current mode detected: {mode}")
+        return mode
+    print("   ⚠️ Could not fetch mode, defaulting to group_based")
+    return "group_based"
+
 def clear_database():
     """Clear all database data except warden user using direct PostgreSQL connection"""
     print("\n🗑️ Clearing Database (keeping warden login)...")
@@ -48,6 +66,7 @@ def clear_database():
         
         # Truncate tables with RESTART IDENTITY to reset IDs to 1
         tables_to_truncate = [
+            "allocation_results",
             "allocation_decisions",
             "allocation_runs", 
             "roommate_invitations",
@@ -149,8 +168,8 @@ def create_allocation_rules():
     for r in rules: session.post(f"{NEST_API}/admin/rules", json=r)
     print("✅ Allocation rules configured.")
 
-def generate_students_and_groups():
-    print("\n🎓 Generating Students & Groups (Exactly 240)...")
+def generate_students_and_groups(mode="group_based"):
+    print(f"\n🎓 Generating Students & Groups (Exactly 240) for mode: {mode}...")
     GROUP_CONFIGS = [
         {"year": 1, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 2}, 
         {"year": 2, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 2}, 
@@ -194,6 +213,11 @@ def generate_students_and_groups():
                     token = res.json().get('accessToken')
                     student_tokens[email] = {'token': token, 'rollNumber': roll}
                     
+                    # Automatically apply so they have an applicationTimestamp
+                    s_session = requests.Session()
+                    s_session.headers.update({"Authorization": f"Bearer {token}"})
+                    s_session.post(f"{NEST_API}/students/me/apply")
+                    
                     info = {'email': email, 'rollNumber': roll, 'group_id': f"{cfg['gender']}_{cfg['year']}_c{c_idx}_{g_idx}_{uid}"}
                     grp_students.append(info)
                 else:
@@ -202,6 +226,11 @@ def generate_students_and_groups():
 
             if grp_students:
                 groups_data.append({'group_id': info['group_id'], 'students': grp_students, 'size': size})
+
+    if mode == "fcfs":
+        print("ℹ️ FCFS mode: Skipping group formation and roommate invitations.")
+        print("✅ All students generated individually!")
+        return
 
     print("🤝 Forming Groups...")
     pending = []
@@ -272,9 +301,11 @@ if __name__ == "__main__":
     print("🎓 HOSTEL ALLOCATION SEEDER")
     print("=" * 60)
     create_admin()
+    enable_applications()
     clear_database()
     setup_hostels()
     create_allocation_rules()
-    generate_students_and_groups()
+    mode = get_allocation_mode()
+    generate_students_and_groups(mode)
     print("\n✅ DATABASE SUCCESSFULLY SEEDED. PROCEED TO UI TO RUN ALLOCATION.")
     print("=" * 60)

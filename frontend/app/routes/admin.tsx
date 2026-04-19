@@ -24,6 +24,10 @@ import {
   Info,
   LayoutGrid,
   ClipboardCheck,
+  UserMinus,
+  Upload,
+  History,
+  RotateCcw,
 } from "lucide-react";
 import { Tooltip } from "react-tooltip";
 import {
@@ -36,6 +40,7 @@ import {
   CardContent,
 } from "~/components/ui";
 import { useAuthStore } from "~/lib/auth-store";
+import { RulesMatrix } from "~/components/admin/RulesMatrix";
 import {
   adminApi,
   studentsApi,
@@ -51,6 +56,8 @@ import {
   type SwapChain,
   type WingParticipationSetting,
   type AllocationPolicy,
+  type Student,
+  type AdministrativeAction,
 } from "~/lib/api";
 
 export function meta() {
@@ -61,16 +68,6 @@ export function meta() {
       content: "Manage hostels, rooms, rules, and allocations",
     },
   ];
-}
-
-interface Student {
-  id?: string;
-  userId: string;
-  rollNumber: string;
-  fullName: string;
-  year: number;
-  program: string;
-  gender: string;
 }
 
 type ActiveSection =
@@ -111,10 +108,23 @@ export default function AdminPage() {
   const [wingSettings, setWingSettings] = useState<
     WingParticipationSetting[]
   >([]);
+  const [viewingRunId, setViewingRunId] = useState<string | null>(null);
+  const [adminActions, setAdminActions] = useState<AdministrativeAction[]>([]);
+  const [revertingActionId, setRevertingActionId] = useState<string | null>(null);
+  const [revertConfirmText, setRevertConfirmText] = useState("");
+  const [isReverting, setIsReverting] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [isPublishingRun, setIsPublishingRun] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  // Mid-Session Operations States
+  const [isEvicting, setIsEvicting] = useState(false);
+  const [evictionSummary, setEvictionSummary] = useState<any[] | null>(null);
+  const [parsedRollNumbers, setParsedRollNumbers] = useState<string[]>([]);
+  const [resetYear, setResetYear] = useState<string>("all");
+  const [isResetting, setIsResetting] = useState(false);
 
   // Form visibility
   const [showHostelForm, setShowHostelForm] = useState(false);
@@ -170,7 +180,15 @@ export default function AdminPage() {
       else if (h >= 30) counts[30]++;
       else counts[0]++;
     });
+
     return counts;
+  }, [allocationResults]);
+
+  const combinedResults = useMemo(() => {
+    return allocationResults.map(r => ({
+      ...r,
+      isUnallocated: r.roomId === null || r.roomId === undefined || r.hostelName === "Unallocated"
+    }));
   }, [allocationResults]);
   const [roomForm, setRoomForm] = useState({
     hostelId: 0,
@@ -206,6 +224,13 @@ export default function AdminPage() {
   const [allocationMode, setAllocationMode] = useState<
     "group_based" | "fcfs" | "wing_fcfs"
   >("group_based");
+
+  // Run Configuration Modal
+  const [showRunModal, setShowRunModal] = useState(false);
+  const [runConfig, setRunConfig] = useState<{
+    targetYears: number[];
+    targetPrograms: string[];
+  }>({ targetYears: [], targetPrograms: [] });
 
   useEffect(() => {
     checkAuth();
@@ -243,6 +268,7 @@ export default function AdminPage() {
         groupsRes,
         hierarchyRes,
         appStatusRes,
+        actionsRes,
       ] = await Promise.all([
         adminApi.getDashboardStats(),
         adminApi.getAllHostels(),
@@ -257,6 +283,7 @@ export default function AdminPage() {
         adminApi.getAllGroups().catch(() => ({ data: [] })),
         adminApi.getHostelHierarchy().catch(() => ({ data: [] })),
         adminApi.getApplicationsEnabled().catch(() => ({ data: { enabled: true } })),
+        adminApi.getAdminActions().catch(() => ({ data: [] })),
       ]);
       setStats(statsRes.data);
       setHostels(hostelsRes.data);
@@ -273,6 +300,7 @@ export default function AdminPage() {
       setApplicationsEnabledState(appStatusRes.data.enabled ?? true);
       setSavedApplicationsEnabled(appStatusRes.data.enabled ?? true);
       setGroups(groupsRes.data || []);
+      setAdminActions(actionsRes.data || []);
     } catch (err: any) {
       if (err.response?.status !== 401) {
         setError("Failed to load data. Make sure the backend is running.");
@@ -422,22 +450,141 @@ export default function AdminPage() {
   };
 
   // Allocation
-  const handleRunAllocation = async () => {
-    if (
-      !confirm(
-        "Run allocation now? This will allocate students to rooms based on current rules.",
-      )
-    )
-      return;
+  const handleRunAllocation = async (config?: { targetYears: number[]; targetPrograms: string[] }) => {
+    setShowRunModal(false);
     setError("");
     setSuccess("");
     try {
-      const res = await adminApi.triggerAllocation({ allocationMode });
+      const payload: { allocationMode: typeof allocationMode; targetYears?: number[]; targetPrograms?: string[] } = {
+        allocationMode,
+        ...(config?.targetYears?.length ? { targetYears: config.targetYears } : {}),
+        ...(config?.targetPrograms?.length ? { targetPrograms: config.targetPrograms } : {}),
+      };
+      const res = await adminApi.triggerAllocation(payload);
       setSuccess("Allocation started! Polling for results...");
       loadAllData();
       pollAllocationStatus(res.data.id);
     } catch (err: any) {
       setError(err.response?.data?.message || "Failed to start allocation");
+    }
+  };
+
+  const handlePublishAndCommit = async (runId: string) => {
+    if (
+      !confirm(
+        "Publish & Commit this allocation?\n\nThis will:\n1. Finalize the results (visible to students)\n2. Lock the room assignments (protected from future runs)\n3. Commit rooms and update student profiles.\n\nAre you sure?"
+      )
+    )
+      return;
+
+    setIsPublishingRun(runId);
+    setError("");
+    setSuccess("");
+    try {
+      const res = await adminApi.publishAndCommitRun(runId);
+      setSuccess(
+        `Allocation published! ${res.data.count} students have been assigned to their rooms.`
+      );
+      loadAllData();
+    } catch (err: any) {
+      setError(
+        err.response?.data?.message || "Failed to publish and commit allocation"
+      );
+    } finally {
+      setIsPublishingRun(null);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (!text) return;
+
+      // Parse CSV: split by newlines, then by commas, take first column, filter out header/empty
+      const lines = text.split(/\r?\n/);
+      const rollNumbers = lines
+        .map(line => {
+          const firstCol = line.split(',')[0];
+          return firstCol ? firstCol.replace(/['"]+/g, '').trim() : '';
+        })
+        .filter(rn => rn && rn.toLowerCase() !== 'roll number' && rn.toLowerCase() !== 'rollnumber');
+      
+      setParsedRollNumbers(rollNumbers);
+      setEvictionSummary(null); // Clear previous summary when new file loaded
+    };
+    reader.readAsText(file);
+  };
+
+  const handleBulkEvict = async () => {
+    if (parsedRollNumbers.length === 0) {
+      setError("Please upload a CSV with roll numbers first.");
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to evict ${parsedRollNumbers.length} students?\n\nThis will permanently remove their room assignments and free up the beds.`)) {
+      return;
+    }
+
+    setIsEvicting(true);
+    setError("");
+    setSuccess("");
+    try {
+      const res = await adminApi.bulkEvictStudents(parsedRollNumbers);
+      setSuccess(res.data.message);
+      setEvictionSummary(res.data.summary);
+      setParsedRollNumbers([]); // Clear after success
+      loadAllData();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to evict students");
+    } finally {
+      setIsEvicting(false);
+    }
+  };
+
+  const handleResetStatus = async () => {
+    const yearLabel = resetYear === "all" ? "all students" : `Year ${resetYear} students`;
+    if (!confirm(`This will allow ${yearLabel} to submit new applications. Are you sure?`)) {
+      return;
+    }
+
+    setIsResetting(true);
+    setError("");
+    setSuccess("");
+    try {
+      const year = resetYear === "all" ? undefined : parseInt(resetYear);
+      const res = await adminApi.resetApplicationStatus(year);
+      setSuccess(res.data.message);
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to reset status");
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleRollback = async () => {
+    if (revertConfirmText !== "REVERT") {
+      setError("Please type 'REVERT' to confirm the rollback.");
+      return;
+    }
+
+    if (!revertingActionId) return;
+
+    setIsReverting(true);
+    setError("");
+    try {
+      await adminApi.rollbackAction(revertingActionId);
+      setSuccess("Action rolled back successfully!");
+      setRevertingActionId(null);
+      setRevertConfirmText("");
+      loadAllData();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to rollback action.");
+    } finally {
+      setIsReverting(false);
     }
   };
 
@@ -452,7 +599,7 @@ export default function AdminPage() {
           loadAllData();
         } else if (res.data.status === "failed") {
           setError(
-            "Allocation failed: " + (res.data.errorMessage || "Unknown error"),
+            "Allocation failed: " + (res.data.errorMessage || "Unknown error")
           );
           loadAllData();
         } else {
@@ -465,45 +612,29 @@ export default function AdminPage() {
     setTimeout(checkStatus, 2000);
   };
 
-  const handleApproveAllocation = async (runId: string) => {
-    if (
-      !confirm("Finalize this allocation? Room assignments will be locked permanently.")
-    )
-      return;
-    setError("");
-    setSuccess("");
-    try {
-      await adminApi.finalizeAllocationRun(runId);
-      setSuccess("Allocation finalized! Room assignments are now locked.");
-      loadAllData();
-    } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to finalize allocation");
-    }
-  };
-
-  const handleCommitAllocation = async (runId: string) => {
-    if (
-      !confirm("Commit this allocation? Room statuses will be updated to occupied.")
-    )
-      return;
-    setError("");
-    setSuccess("");
-    try {
-      await adminApi.commitAllocationRun(runId);
-      setSuccess("Allocation committed! Room statuses are now occupied.");
-      loadAllData();
-    } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to commit allocation");
-    }
-  };
-
   const handleViewResults = async (runId: string) => {
     try {
-      const resultsRes = await adminApi.getAllocationResults(runId);
-      setAllocationResults(resultsRes.data || []);
+      const res = await adminApi.getAllocationResults(runId);
+      setAllocationResults(res.data);
+      setViewingRunId(runId);
       setVisibleResultsCount(30); // Reset the pagination count when viewing new results
+      loadAllData(); // Refresh run data to get the latest total/allocated counts
     } catch (err) {
       console.error("Failed to fetch results", err);
+    }
+  };
+
+  const handleDeleteRun = async (runId: string) => {
+    if (!confirm("Are you sure you want to delete this allocation run? This will permanently remove all assignments associated with it.")) {
+      return;
+    }
+
+    try {
+      await adminApi.deleteAllocationRun(runId);
+      setSuccess("Allocation run deleted successfully.");
+      loadAllData();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to delete allocation run");
     }
   };
 
@@ -558,6 +689,7 @@ export default function AdminPage() {
   ];
 
   return (
+    <>
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
@@ -1198,185 +1330,20 @@ export default function AdminPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-900">
-                    Allocation Rules
+                  <h2 className="text-2xl font-black text-slate-900">
+                    Allocation Eligibility
                   </h2>
-                  <p className="text-slate-600 font-medium">
-                    Configure allocation constraints
+                  <p className="text-slate-500 font-medium">
+                    Simplified management of hostel-year restrictions
                   </p>
                 </div>
-                <Button onClick={() => setShowRuleForm(!showRuleForm)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Rule
-                </Button>
               </div>
 
-              {showRuleForm && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Create Rule</CardTitle>
-                    <CardDescription>
-                      Define who can be allocated where
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <form
-                      onSubmit={handleCreateRule}
-                      className="grid grid-cols-2 md:grid-cols-3 gap-4"
-                    >
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">
-                          Hostel (optional)
-                        </label>
-                        <select
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500"
-                          value={ruleForm.hostelId || ""}
-                          onChange={(e) =>
-                            setRuleForm({
-                              ...ruleForm,
-                              hostelId: e.target.value
-                                ? Number(e.target.value)
-                                : null,
-                            })
-                          }
-                        >
-                          <option value="">All Hostels</option>
-                          {hostels.map((h) => (
-                            <option key={h.id} value={h.id}>
-                              {h.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">
-                          Year (optional)
-                        </label>
-                        <select
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500"
-                          value={ruleForm.year || ""}
-                          onChange={(e) =>
-                            setRuleForm({
-                              ...ruleForm,
-                              year: e.target.value
-                                ? Number(e.target.value)
-                                : null,
-                            })
-                          }
-                        >
-                          <option value="">All Years</option>
-                          <option value={1}>1st Year</option>
-                          <option value={2}>2nd Year</option>
-                          <option value={3}>3rd Year</option>
-                          <option value={4}>4th Year</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">
-                          Action
-                        </label>
-                        <select
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500"
-                          value={ruleForm.isAllowed ? "allow" : "deny"}
-                          onChange={(e) =>
-                            setRuleForm({
-                              ...ruleForm,
-                              isAllowed: e.target.value === "allow",
-                            })
-                          }
-                        >
-                          <option value="allow">Allow</option>
-                          <option value="deny">Deny</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          Priority (higher = more important)
-                        </label>
-                        <Input
-                          type="number"
-                          value={ruleForm.priority}
-                          onChange={(e) =>
-                            setRuleForm({
-                              ...ruleForm,
-                              priority: Number(e.target.value),
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="block text-sm font-medium mb-1">
-                          Description
-                        </label>
-                        <Input
-                          placeholder="e.g., 1st year students go to BH-1"
-                          value={ruleForm.description}
-                          onChange={(e) =>
-                            setRuleForm({
-                              ...ruleForm,
-                              description: e.target.value,
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="col-span-full flex gap-2">
-                        <Button type="submit">Create Rule</Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setShowRuleForm(false)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </form>
-                  </CardContent>
-                </Card>
-              )}
-
-              <div className="space-y-3">
-                {rules.map((rule) => (
-                  <Card key={rule.id}>
-                    <CardContent className="py-4 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div
-                          className={`w-3 h-3 rounded-full ${rule.isAllowed ? "bg-green-500" : "bg-red-500"}`}
-                        />
-                        <div>
-                          <p className="font-bold text-slate-900 text-lg">
-                            {rule.description || `Rule #${rule.id}`}
-                          </p>
-                          <p className="text-sm font-semibold text-slate-700">
-                            {rule.hostelId
-                              ? hostels.find((h) => h.id === rule.hostelId)
-                                  ?.name
-                              : "All Hostels"}
-                            {rule.year
-                              ? ` | Year ${rule.year}`
-                              : " | All Years"}
-                            {` | Priority: ${rule.priority}`}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteRule(rule.id)}
-                        className="text-red-500 hover:bg-red-50 p-2 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </CardContent>
-                  </Card>
-                ))}
-                {rules.length === 0 && (
-                  <div className="text-center py-12 text-gray-500 bg-white rounded-lg border border-dashed">
-                    <Settings className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>
-                      No rules defined. Click "Add Rule" to create allocation
-                      constraints.
-                    </p>
-                  </div>
-                )}
-              </div>
+              <RulesMatrix 
+                hostels={hostels} 
+                onSuccess={(msg) => setSuccess(msg)}
+                onError={(msg) => setError(msg)}
+              />
             </div>
           )}
 
@@ -1541,7 +1508,7 @@ export default function AdminPage() {
                                             onChange={(e) =>
                                               setEditedStudent({
                                                 ...editedStudent,
-                                                gender: e.target.value,
+                                                gender: e.target.value as "male" | "female",
                                               })
                                             }
                                           >
@@ -1808,26 +1775,102 @@ export default function AdminPage() {
                     </p>
                   </div>
 
-                  {/* Finalized warning */}
-                  {allocationRuns.some((r) => r.finalized) && (
-                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-amber-700">
-                      <CheckCircle className="w-5 h-5 shrink-0" />
-                      <span>
-                        An allocation has been finalized. Re-running is blocked to protect room assignments.
-                      </span>
-                    </div>
-                  )}
-
                   {/* Run Now Button */}
                   <Button
-                    onClick={handleRunAllocation}
+                    onClick={() => {
+                      setRunConfig({ targetYears: [], targetPrograms: [] });
+                      setShowRunModal(true);
+                    }}
                     className="w-full"
                     size="lg"
-                    disabled={allocationRuns.some((r) => r.finalized)}
+                    disabled={allocationRuns.some(r => !r.finalized && (r.status === 'completed' || r.status === 'running' || r.status === 'queued'))}
                   >
                     <Play className="w-5 h-5 mr-2" />
-                    Run Allocation Now
+                    Configure & Run Allocation
                   </Button>
+
+                  {/* Run Configuration Modal */}
+                  {showRunModal && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+                        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-4">
+                          <h3 className="text-lg font-bold text-white">Configure Allocation Run</h3>
+                          <p className="text-indigo-200 text-sm">Mode: <span className="font-semibold capitalize">{allocationMode.replace('_', ' ')}</span></p>
+                        </div>
+                        <div className="p-6 space-y-5">
+                          {/* Info banner */}
+                          <div className="flex gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+                            <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>Only the selected cohort will be allocated into available beds. <strong>Locked allocations from previous finalized runs will not be affected.</strong> Leave all unchecked to run for the entire campus.</span>
+                          </div>
+
+                          {/* Target Years */}
+                          <div>
+                            <p className="text-sm font-semibold text-slate-700 mb-2">Target Years <span className="font-normal text-slate-400">(empty = all years)</span></p>
+                            <div className="grid grid-cols-4 gap-2">
+                              {[1, 2, 3, 4].map((yr) => (
+                                <label key={yr} className="flex items-center gap-2 cursor-pointer p-2 border rounded-lg hover:bg-indigo-50 transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={runConfig.targetYears.includes(yr)}
+                                    onChange={(e) => {
+                                      setRunConfig(prev => ({
+                                        ...prev,
+                                        targetYears: e.target.checked
+                                          ? [...prev.targetYears, yr]
+                                          : prev.targetYears.filter(y => y !== yr)
+                                      }));
+                                    }}
+                                    className="accent-indigo-600"
+                                  />
+                                  <span className="text-sm font-medium text-slate-700">Year {yr}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Target Programs */}
+                          <div>
+                            <p className="text-sm font-semibold text-slate-700 mb-2">Target Programs <span className="font-normal text-slate-400">(empty = all programs)</span></p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {Array.from(new Set(students.map(s => s.program).filter(Boolean))).sort().map((prog) => (
+                                <label key={prog} className="flex items-center gap-2 cursor-pointer p-2 border rounded-lg hover:bg-indigo-50 transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={runConfig.targetPrograms.includes(prog!)}
+                                    onChange={(e) => {
+                                      setRunConfig(prev => ({
+                                        ...prev,
+                                        targetPrograms: e.target.checked
+                                          ? [...prev.targetPrograms, prog!]
+                                          : prev.targetPrograms.filter(p => p !== prog)
+                                      }));
+                                    }}
+                                    className="accent-indigo-600"
+                                  />
+                                  <span className="text-sm font-medium text-slate-700">{prog}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border-t px-6 py-4 flex justify-between items-center gap-3">
+                          <Button variant="outline" onClick={() => setShowRunModal(false)}>Cancel</Button>
+                          <Button onClick={() => handleRunAllocation(runConfig)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                            <Play className="w-4 h-4 mr-2" />
+                            {runConfig.targetYears.length === 0 && runConfig.targetPrograms.length === 0
+                              ? "Run Full Campus Allocation"
+                              : `Run for ${[
+                                  runConfig.targetYears.length ? `Year ${runConfig.targetYears.join(', ')}` : null,
+                                  runConfig.targetPrograms.length ? runConfig.targetPrograms.join(', ') : null
+                                ].filter(Boolean).join(' · ')}`
+                            }
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -1893,20 +1936,28 @@ export default function AdminPage() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleApproveAllocation(run.id)}
+                                  onClick={() => handleDeleteRun(run.id)}
+                                  className="text-red-600 border-red-200 hover:bg-red-50"
                                 >
-                                  <Check className="w-4 h-4 mr-1" />
-                                  Finalize
+                                  <Trash2 className="w-4 h-4" />
                                 </Button>
                               )}
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={() => handleCommitAllocation(run.id)}
-                              >
-                                <Play className="w-4 h-4 mr-1" />
-                                Commit Allocation
-                              </Button>
+                              {!run.finalized && (
+                                 <Button
+                                   variant="primary"
+                                   size="sm"
+                                   disabled={isPublishingRun === run.id}
+                                   onClick={() => handlePublishAndCommit(run.id)}
+                                   className="bg-green-600 hover:bg-green-700 text-white"
+                                 >
+                                   {isPublishingRun === run.id ? (
+                                     <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                   ) : (
+                                     <CheckCircle className="w-4 h-4 mr-1" />
+                                   )}
+                                   Publish & Commit
+                                 </Button>
+                               )}
                             </>
                           )}
                           <span
@@ -1932,6 +1983,193 @@ export default function AdminPage() {
                           No allocation runs yet. Click "Run Allocation Now" to
                           start.
                         </p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Mid-Session Operations */}
+              <Card className="border-amber-200 bg-amber-50/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-amber-800">
+                    <UserMinus className="w-5 h-5" />
+                    Mid-Session Operations
+                  </CardTitle>
+                  <CardDescription className="text-amber-700">
+                    Bulk evict students (graduates/leavers) and free up their beds for new allocations.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-col md:flex-row gap-4 items-start">
+                    <div className="flex-1 w-full p-6 border-2 border-dashed border-amber-300 rounded-xl bg-white hover:border-amber-400 transition-colors group">
+                      <input
+                        type="file"
+                        accept=".csv"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                        id="csv-evict-upload"
+                      />
+                      <label 
+                        htmlFor="csv-evict-upload"
+                        className="flex flex-col items-center cursor-pointer"
+                      >
+                        <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                          <Upload className="w-6 h-6 text-amber-600" />
+                        </div>
+                        <span className="text-sm font-bold text-slate-700">Upload Roll Numbers CSV</span>
+                        <span className="text-xs text-slate-500 mt-1">First column should be Roll Number</span>
+                      </label>
+                    </div>
+
+                    <div className="w-full md:w-64 space-y-3">
+                      <div className="p-3 bg-white rounded-lg border border-amber-200 shadow-sm">
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Parsed Students</p>
+                        <p className="text-2xl font-black text-amber-600">{parsedRollNumbers.length}</p>
+                      </div>
+                      <Button
+                        onClick={handleBulkEvict}
+                        disabled={isEvicting || parsedRollNumbers.length === 0}
+                        className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold"
+                      >
+                        {isEvicting ? (
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <UserMinus className="w-4 h-4 mr-2" />
+                        )}
+                        Evict & Free Beds
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-amber-200 mt-4">
+                    <h5 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                      <RefreshCw className="w-4 h-4 text-amber-600" />
+                      Reset Application Status
+                    </h5>
+                    <div className="flex gap-3">
+                      <select 
+                        value={resetYear}
+                        onChange={(e) => setResetYear(e.target.value)}
+                        className="flex-1 h-10 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                      >
+                        <option value="all">All Students</option>
+                        <option value="1">Year 1</option>
+                        <option value="2">Year 2</option>
+                        <option value="3">Year 3</option>
+                        <option value="4">Year 4</option>
+                      </select>
+                      <Button
+                        onClick={handleResetStatus}
+                        disabled={isResetting}
+                        className="bg-slate-800 hover:bg-slate-900 text-white font-bold"
+                      >
+                        {isResetting ? (
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        ) : null}
+                        {isResetting ? "Resetting..." : "Reset Status"}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-2">
+                      Clears "Application Submitted" lock for selected cohort. Students will be able to apply again.
+                    </p>
+                  </div>
+
+                  {evictionSummary && evictionSummary.length > 0 && (
+                    <div className="mt-6 border rounded-xl overflow-hidden bg-white">
+                      <div className="bg-slate-50 px-4 py-2 border-b flex justify-between items-center">
+                        <h5 className="text-xs font-bold text-slate-700 uppercase">Eviction Summary</h5>
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">
+                          {evictionSummary.length} Beds Freed
+                        </span>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50 text-slate-500 sticky top-0">
+                            <tr>
+                              <th className="px-4 py-2 text-left font-bold">Roll Number</th>
+                              <th className="px-4 py-2 text-left font-bold">Name</th>
+                              <th className="px-4 py-2 text-left font-bold">Freed Room</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {evictionSummary.map((s, i) => (
+                              <tr key={i} className="hover:bg-slate-50">
+                                <td className="px-4 py-2 font-mono text-xs">{s.rollNumber}</td>
+                                <td className="px-4 py-2 font-medium">{s.fullName}</td>
+                                <td className="px-4 py-2">
+                                  <span className="text-xs font-bold px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-100">
+                                    {s.hostelName} - {s.roomNumber}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* System Logs & Rollbacks */}
+              <Card className="border-indigo-200 bg-indigo-50/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-indigo-800">
+                    <History className="w-5 h-5" />
+                    System Logs & Rollbacks
+                  </CardTitle>
+                  <CardDescription className="text-indigo-700">
+                    Chronological record of major system changes. Rollbacks restore student and room states to the pre-action snapshot.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {adminActions.length > 0 ? (
+                      adminActions.map((action) => (
+                        <div 
+                          key={action.id} 
+                          className={`p-4 rounded-xl border flex items-center justify-between ${
+                            action.isReverted 
+                              ? "bg-slate-50 border-slate-200 opacity-60" 
+                              : "bg-white border-indigo-100 shadow-sm"
+                          }`}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                              action.actionType === "ALLOCATION" ? "bg-green-100 text-green-600" : "bg-amber-100 text-amber-600"
+                            }`}>
+                              {action.actionType === "ALLOCATION" ? <ClipboardCheck className="w-5 h-5" /> : <UserMinus className="w-5 h-5" />}
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-900 leading-tight">
+                                {action.description}
+                                {action.isReverted && (
+                                  <span className="ml-2 px-2 py-0.5 text-[10px] bg-slate-200 text-slate-600 rounded-full uppercase tracking-wider">Reverted</span>
+                                )}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-1">
+                                {new Date(action.timestamp).toLocaleString()} • {action.performedBy}
+                              </p>
+                            </div>
+                          </div>
+                          {!action.isReverted && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setRevertingActionId(action.id)}
+                              className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                            >
+                              <RotateCcw className="w-4 h-4 mr-1.5" />
+                              Undo
+                            </Button>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-slate-400">
+                        <History className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                        <p className="text-sm">No administrative actions logged yet.</p>
                       </div>
                     )}
                   </div>
@@ -2046,23 +2284,43 @@ export default function AdminPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {allocationResults
+                          {combinedResults
                             .slice(0, visibleResultsCount)
                             .map((result: any, idx) => {
                               const student = students.find(s => s.userId === result.studentId || s.userId === result.student_id);
                               return (
-                                <tr key={idx} className="hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0">
+                                <tr key={idx} className={`hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0 ${result.isUnallocated ? "bg-red-50/30" : ""}`}>
                                   <td className="px-4 py-3 font-semibold text-slate-900">
                                     <div className="flex flex-col">
                                       <span>{student?.fullName || "Unknown Student"}</span>
                                       <span className="text-xs font-medium text-slate-500">{student?.rollNumber || result.studentId || result.student_id}</span>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-3 text-slate-800 font-medium">
-                                    {result.hostelName || result.hostel_name || "-"}
+                                  <td
+                                    className={`px-4 py-3 font-medium ${result.isUnallocated ? "text-red-600" : "text-slate-800"}`}
+                                  >
+                                    {result.hostelName ||
+                                      result.hostel_name ||
+                                      "-"}
                                   </td>
-                                  <td className="px-4 py-3 text-slate-900 font-bold">
-                                    {result.roomNumber || result.room_number || "-"}
+                                  <td
+                                    className={`px-4 py-3 ${result.isUnallocated ? "text-red-600" : "text-slate-900"}`}
+                                  >
+                                    {result.isUnallocated ? (
+                                      <div className="flex flex-col">
+                                        <span className="font-bold">Pending</span>
+                                        <span className="text-xs italic opacity-80">
+                                          {result.reason ||
+                                            "No valid rooms found"}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="font-bold">
+                                        {result.roomNumber ||
+                                          result.room_number ||
+                                          "-"}
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700">
                                     {result.wing || result.wing_name || "-"} / {result.floor ?? "-"}
@@ -2092,19 +2350,16 @@ export default function AdminPage() {
                         </tbody>
                       </table>
                     </div>
-                    {allocationResults.length > visibleResultsCount && (
-                      <div className="p-4 border-t text-center">
-                        <p className="text-sm text-gray-500 mb-2">
-                          Showing first {visibleResultsCount} of{" "}
-                          {allocationResults.length} results
-                        </p>
+                    {combinedResults.length > visibleResultsCount && (
+                      <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-center">
                         <Button
                           variant="outline"
                           onClick={() =>
                             setVisibleResultsCount((prev) => prev + 50)
                           }
                         >
-                          Load More
+                          Show More Results ({visibleResultsCount} of{" "}
+                          {combinedResults.length})
                         </Button>
                       </div>
                     )}
@@ -2681,7 +2936,7 @@ export default function AdminPage() {
                       </p>
                     </div>
                     <Button
-                      variant={applicationsEnabled ? "default" : "outline"}
+                      variant={applicationsEnabled ? "primary" : "outline"}
                       onClick={() => setApplicationsEnabledState(!applicationsEnabled)}
                       className={applicationsEnabled ? "bg-green-600 hover:bg-green-700" : ""}
                     >
@@ -2730,5 +2985,60 @@ export default function AdminPage() {
         </div>
       </main>
     </div>
+    
+    {/* Rollback Confirmation Modal */}
+    {revertingActionId && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md shadow-2xl animate-in zoom-in duration-200">
+          <CardHeader className="text-center pb-2">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <RotateCcw className="w-8 h-8 text-red-600" />
+            </div>
+            <CardTitle className="text-2xl font-black text-slate-900">Rollback Action?</CardTitle>
+            <CardDescription className="text-slate-600 text-base">
+              This will restore all student assignments and room statuses to the state they were in before this action. This cannot be undone.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6 pt-4">
+            <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+              <p className="text-sm text-red-700 font-medium">
+                To confirm, please type <span className="font-black underline italic">REVERT</span> below:
+              </p>
+              <Input
+                value={revertConfirmText}
+                onChange={(e) => setRevertConfirmText(e.target.value)}
+                placeholder="Type REVERT here..."
+                className="mt-3 bg-white border-red-200 focus:ring-red-500 text-center font-bold tracking-widest uppercase"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1 font-bold"
+                onClick={() => {
+                  setRevertingActionId(null);
+                  setRevertConfirmText("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold"
+                disabled={revertConfirmText !== "REVERT" || isReverting}
+                onClick={handleRollback}
+              >
+                {isReverting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Execute Rollback"
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+    </>
   );
 }

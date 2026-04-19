@@ -494,6 +494,10 @@ export class SwapsService {
     const requesterOldRoom = requester.currentRoomId;
     const targetOldRoom = target.currentRoomId;
 
+    if (requesterOldRoom === null || targetOldRoom === null) {
+      throw new BadRequestException('Both students must have rooms assigned to execute a swap');
+    }
+
     // Swap rooms
     requester.currentRoomId = targetOldRoom;
     target.currentRoomId = requesterOldRoom;
@@ -506,8 +510,8 @@ export class SwapsService {
     histories.push(
       this.swapHistoryRepository.create({
         studentId: request.requesterId,
-        previousRoomId: requesterOldRoom,
-        newRoomId: targetOldRoom,
+        previousRoomId: requesterOldRoom as number,
+        newRoomId: targetOldRoom as number,
         swapRequestId: requestId,
         executionType: SwapExecutionType.DIRECT,
         executedById: adminUserId,
@@ -517,8 +521,8 @@ export class SwapsService {
     histories.push(
       this.swapHistoryRepository.create({
         studentId: request.targetStudentId,
-        previousRoomId: targetOldRoom,
-        newRoomId: requesterOldRoom,
+        previousRoomId: targetOldRoom as number,
+        newRoomId: requesterOldRoom as number,
         swapRequestId: requestId,
         executionType: SwapExecutionType.DIRECT,
         executedById: adminUserId,
@@ -595,7 +599,7 @@ export class SwapsService {
         student.currentRoomId = assignment.newRoomId;
         await this.studentRepository.save(student);
 
-        const history = this.swapHistoryRepository.create({
+        const history: SwapHistory = this.swapHistoryRepository.create({
           studentId: assignment.studentId,
           previousRoomId: assignment.oldRoomId,
           newRoomId: assignment.newRoomId,

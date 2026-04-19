@@ -89,7 +89,7 @@ function StudentDashboard() {
     }
   };
 
-  const hasApplied = !!student?.applicationTimestamp;
+  const hasApplied = !!student?.hasSubmitted;
 
   useEffect(() => {
     const fetchStudentData = async () => {

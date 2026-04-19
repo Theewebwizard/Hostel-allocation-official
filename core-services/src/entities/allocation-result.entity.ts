@@ -21,13 +21,13 @@ export class AllocationResult {
   @Column()
   studentId: string;
 
-  @Column()
+  @Column({ nullable: true })
   roomId: number;
 
-  @Column()
+  @Column({ nullable: true })
   hostelName: string;
 
-  @Column()
+  @Column({ nullable: true })
   roomNumber: string;
 
   @Column({ nullable: true })
@@ -38,6 +38,12 @@ export class AllocationResult {
 
   @Column({ nullable: true })
   groupId: number;
+
+  @Column({ nullable: true })
+  reason: string;
+
+  @Column({ default: false })
+  isLocked: boolean;
 
   @Column({ default: 50 })
   happiness: number; // 0-100 satisfaction score

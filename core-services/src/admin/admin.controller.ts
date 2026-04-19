@@ -32,6 +32,9 @@ import {
   UpdateAllocationResultDto,
   SetWingParticipationDto,
   SetAllocationPolicyDto,
+  BulkEvictDto,
+  ResetStatusDto,
+  SaveRulesMatrixDto,
 } from './dto/admin.dto';
 
 @ApiTags('admin')
@@ -168,6 +171,18 @@ export class AdminController {
     return this.adminService.getAllRules();
   }
 
+  @Get('rules/matrix')
+  @ApiOperation({ summary: 'Get the eligibility matrix' })
+  async getRulesMatrix() {
+    return this.adminService.getRulesMatrix();
+  }
+
+  @Post('rules/matrix')
+  @ApiOperation({ summary: 'Save the eligibility matrix' })
+  async saveRulesMatrix(@Body() dto: SaveRulesMatrixDto) {
+    return this.adminService.saveRulesMatrix(dto.matrix);
+  }
+
   @Get('rules/:id')
   @ApiOperation({ summary: 'Get rule by ID' })
   @ApiResponse({ status: 200, description: 'Rule details' })
@@ -192,6 +207,7 @@ export class AdminController {
     return this.adminService.deleteRule(id);
   }
 
+
   // ============ ALLOCATION RUNS ============
 
   @Post('allocation/run')
@@ -201,7 +217,12 @@ export class AdminController {
     @Request() req,
     @Body() dto: TriggerAllocationDto = {},
   ) {
-    return this.adminService.triggerAllocation(req.user.id, dto.allocationMode);
+    return this.adminService.triggerAllocation(
+      req.user.id,
+      dto.allocationMode,
+      dto.targetYears,
+      dto.targetPrograms,
+    );
   }
 
   @Get('allocation/runs')
@@ -218,6 +239,14 @@ export class AdminController {
     return this.adminService.getAllocationRunById(id);
   }
 
+  @Delete('allocation/runs/:id')
+  @ApiOperation({ summary: 'Delete a non-finalized allocation run' })
+  @ApiResponse({ status: 200, description: 'Allocation run deleted' })
+  @ApiResponse({ status: 400, description: 'Cannot delete a finalized run' })
+  async deleteAllocationRun(@Param('id') id: string) {
+    return this.adminService.deleteAllocationRun(id);
+  }
+
   @Get('allocation/runs/:id/results')
   @ApiOperation({ summary: 'Get allocation results for a run' })
   @ApiResponse({ status: 200, description: 'Allocation results' })
@@ -225,20 +254,12 @@ export class AdminController {
     return this.adminService.getAllocationResults(id);
   }
 
-  @Post('allocation/runs/:id/finalize')
-  @ApiOperation({ summary: 'Finalize an allocation run' })
-  @ApiResponse({ status: 200, description: 'Allocation run finalized' })
-  @ApiResponse({ status: 400, description: 'Cannot finalize this run' })
-  async finalizeAllocationRun(@Param('id') id: string) {
-    return this.adminService.finalizeAllocationRun(id);
-  }
-
-  @Post('allocation/runs/:id/commit')
-  @ApiOperation({ summary: 'Commit an allocation run to update room status' })
-  @ApiResponse({ status: 200, description: 'Allocation run committed' })
-  @ApiResponse({ status: 400, description: 'Cannot commit this run' })
-  async commitAllocationRun(@Param('id') id: string) {
-    return this.adminService.commitAllocationRun(id);
+  @Post('allocation/runs/:id/publish')
+  @ApiOperation({ summary: 'Finalize, lock, and commit an allocation run in one transaction' })
+  @ApiResponse({ status: 200, description: 'Allocation run published and committed' })
+  @ApiResponse({ status: 400, description: 'Cannot publish this run' })
+  async publishAndCommitRun(@Param('id') id: string) {
+    return this.adminService.publishAndCommitRun(id);
   }
 
   @Patch('allocation/results/:id')
@@ -253,6 +274,21 @@ export class AdminController {
     @Body() dto: UpdateAllocationResultDto,
   ) {
     return this.adminService.updateAllocationResult(id, dto.roomId);
+  }
+
+  @Post('allocation/evict-bulk')
+  @ApiOperation({ summary: 'Bulk evict students by roll numbers' })
+  @ApiResponse({ status: 200, description: 'Students evicted and rooms freed' })
+  @ApiResponse({ status: 400, description: 'No matching students found' })
+  async bulkEvictStudents(@Body() dto: BulkEvictDto) {
+    return this.adminService.bulkEvictStudents(dto.rollNumbers);
+  }
+
+  @Post('allocation/reset-status')
+  @ApiOperation({ summary: 'Manual reset of student application status' })
+  @ApiResponse({ status: 200, description: 'Application status reset' })
+  async resetApplicationStatus(@Body() dto: ResetStatusDto) {
+    return this.adminService.resetApplicationStatus(dto.year);
   }
 
   // ============ WING PARTICIPATION SETTINGS ============
@@ -312,5 +348,22 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Groups retrieved successfully' })
   async getAllGroups() {
     return this.allocationDataService.getAllGroups();
+  }
+
+  // ============ SYSTEM LOGS & ROLLBACKS ============
+
+  @Get('logs')
+  @ApiOperation({ summary: 'Get recent administrative actions' })
+  @ApiResponse({ status: 200, description: 'List of administrative actions' })
+  async getAdminActions() {
+    return this.adminService.getAdminActions();
+  }
+
+  @Post('logs/:id/rollback')
+  @ApiOperation({ summary: 'Rollback a previous administrative action' })
+  @ApiResponse({ status: 200, description: 'Action rolled back' })
+  @ApiResponse({ status: 404, description: 'Action not found' })
+  async rollbackAction(@Param('id') id: string) {
+    return this.adminService.rollbackAction(id);
   }
 }

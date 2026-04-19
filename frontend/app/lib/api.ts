@@ -61,6 +61,8 @@ export interface Student {
   program: string;
   gender?: "male" | "female";
   applicationTimestamp?: string;
+  hasSubmitted?: boolean;
+  applicationStatus?: string;
 }
 
 export interface AuthResponse {
@@ -129,6 +131,17 @@ export interface Invitation {
   invitedBy: string;
   invitedAt: string;
   status: string;
+  policy?: string;
+}
+
+export interface AdministrativeAction {
+  id: string;
+  actionType: "EVICTION" | "ALLOCATION";
+  performedBy: string;
+  description: string;
+  timestamp: string;
+  snapshot: Record<string, number | null>;
+  isReverted: boolean;
 }
 
 export const groupsApi = {
@@ -194,13 +207,15 @@ export interface AllocationResult {
   id: number;
   runId: string;
   studentId: string;
-  roomId: number;
-  hostelName: string;
-  roomNumber: string;
+  roomId?: number;
+  hostelName?: string;
+  roomNumber?: string;
   wing?: string;
-  floor?: number;
+  floor?: number | string;
   groupId?: number;
   happiness: number;
+  reason?: string;
+  isLocked?: boolean;
   createdAt: string;
   room?: Room;
   student?: {
@@ -279,22 +294,37 @@ export const adminApi = {
   updateRule: (id: number, data: Partial<AllocationRule>) =>
     api.patch<AllocationRule>(`/admin/rules/${id}`, data),
   deleteRule: (id: number) => api.delete(`/admin/rules/${id}`),
+  getRulesMatrix: () => api.get<Record<number, {
+    years: Record<number, boolean>;
+    wings: Record<string, Record<number, boolean>>;
+  }>>("/admin/rules/matrix"),
+  saveRulesMatrix: (matrix: Record<number, {
+    years: Record<number, boolean>;
+    wings: Record<string, Record<number, boolean>>;
+  }>) => 
+    api.post("/admin/rules/matrix", { matrix }),
 
   // Allocation
   triggerAllocation: (data?: {
     allocationMode?: "group_based" | "fcfs" | "wing_fcfs";
+    targetYears?: number[];
+    targetPrograms?: string[];
   }) => api.post<AllocationRun>("/admin/allocation/run", data || {}),
   getAllocationRuns: () => api.get<AllocationRun[]>("/admin/allocation/runs"),
-  getAllocationRun: (id: string) =>
-    api.get<AllocationRun>(`/admin/allocation/runs/${id}`),
+  getAllocationRun: (id: string) => api.get<AllocationRun>(`/admin/allocation/runs/${id}`),
+  deleteAllocationRun: (id: string) => api.delete<{ message: string }>(`/admin/allocation/runs/${id}`),
   getAllocationResults: (runId: string) =>
     api.get<AllocationResult[]>(`/admin/allocation/runs/${runId}/results`),
-  finalizeAllocationRun: (id: string) =>
-    api.post(`/admin/allocation/runs/${id}/finalize`),
-  commitAllocationRun: (id: string) =>
-    api.post(`/admin/allocation/runs/${id}/commit`),
+  publishAndCommitRun: (id: string) =>
+    api.post<{ message: string; count: number }>(`/admin/allocation/runs/${id}/publish`),
   updateAllocationResult: (id: number, roomId: number) =>
     api.patch<AllocationResult>(`/admin/allocation/results/${id}`, { roomId }),
+  bulkEvictStudents: (rollNumbers: string[]) =>
+    api.post<{ message: string; summary: any[] }>('/admin/allocation/evict-bulk', { rollNumbers }),
+  resetApplicationStatus: (year?: number) =>
+    api.post<{ message: string }>('/admin/allocation/reset-status', { year }),
+  getAdminActions: () => api.get<AdministrativeAction[]>("/admin/logs"),
+  rollbackAction: (id: string) => api.post<{ message: string }>(`/admin/logs/${id}/rollback`),
 
   // Wing Participation Settings
   setWingParticipation: (year: number, isAllowed: boolean) =>

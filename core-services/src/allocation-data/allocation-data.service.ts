@@ -36,7 +36,7 @@ export class AllocationDataService {
   async getAllStudents() {
     return this.studentRepository.find({
       where: {
-        applicationTimestamp: Not(IsNull()),
+        hasSubmitted: true,
       },
       select: [
         'userId',
@@ -46,6 +46,7 @@ export class AllocationDataService {
         'gender',
         'program',
         'applicationTimestamp',
+        'currentRoomId',
       ],
     });
   }
@@ -62,7 +63,7 @@ export class AllocationDataService {
       name: group.name,
       creatorId: group.creatorId,
       members: group.memberships
-        .filter((m) => m.status === MembershipStatus.ACCEPTED && m.student.applicationTimestamp !== null)
+        .filter((m) => m.status === MembershipStatus.ACCEPTED && m.student.hasSubmitted === true)
         .map((m) => ({
           userId: m.student.userId,
           rollNumber: m.student.rollNumber,
@@ -71,6 +72,7 @@ export class AllocationDataService {
           gender: m.student.gender,
           program: m.student.program,
           applicationTimestamp: m.student.applicationTimestamp,
+          currentRoomId: m.student.currentRoomId,
         })),
     }));
   }
@@ -141,6 +143,7 @@ export class AllocationDataService {
         floor: result.floor,
         groupId: result.group_id,
         happiness: result.happiness,
+        reason: result.reason,
       }),
     );
 

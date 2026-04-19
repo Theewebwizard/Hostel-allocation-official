@@ -37,15 +37,21 @@ export class Student {
   program: string;
 
   @Column({ type: 'timestamp', nullable: true })
-  applicationTimestamp: Date;
+  applicationTimestamp: Date | null;
+
+  @Column({ default: false })
+  hasSubmitted: boolean;
+
+  @Column({ default: 'NONE' })
+  applicationStatus: string;
 
   // Room assigned during initial allocation
   @Column({ nullable: true })
-  allocatedRoomId: number;
+  allocatedRoomId: number | null;
 
   // Current room (may differ from allocated after swaps)
   @Column({ nullable: true })
-  currentRoomId: number;
+  currentRoomId: number | null;
 
   @OneToOne(() => User, (user) => user.student, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })

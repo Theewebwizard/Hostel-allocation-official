@@ -79,6 +79,8 @@ export class StudentsService {
 
     return this.studentRepository.update(userId, {
       applicationTimestamp: new Date(),
+      hasSubmitted: true,
+      applicationStatus: 'SUBMITTED',
     });
   }
 }

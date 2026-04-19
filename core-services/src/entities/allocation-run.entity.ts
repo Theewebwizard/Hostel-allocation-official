@@ -61,6 +61,12 @@ export class AllocationRun {
   @Column({ default: false })
   finalized: boolean;
 
+  @Column({ type: 'jsonb', nullable: true })
+  targetYears: number[] | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  targetPrograms: string[] | null;
+
   @CreateDateColumn()
   startTime: Date;
 

@@ -15,6 +15,7 @@ import {
   Student,
   WingParticipationSetting,
   SystemSetting,
+  AdministrativeAction,
 } from '../entities';
 
 @Module({
@@ -30,6 +31,7 @@ import {
       Student,
       WingParticipationSetting,
       SystemSetting,
+      AdministrativeAction,
     ]),
     DecisionsModule,
     AllocationDataModule,

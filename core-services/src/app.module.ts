@@ -25,6 +25,7 @@ import {
   WingParticipationSetting,
   SystemSetting,
   RoommateInvitation,
+  AdministrativeAction,
 } from './entities';
 import { RoommateInvitationsModule } from './roommate-invitations/roommate-invitations.module';
 
@@ -58,6 +59,7 @@ import { RoommateInvitationsModule } from './roommate-invitations/roommate-invit
           WingParticipationSetting,
           SystemSetting,
           RoommateInvitation,
+          AdministrativeAction,
         ],
         synchronize: configService.get('NODE_ENV') === 'development', // Auto-sync in dev only
       }),

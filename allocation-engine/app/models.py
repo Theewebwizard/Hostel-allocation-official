@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from enum import Enum
 
 
@@ -17,6 +17,7 @@ class GenderType(str, Enum):
 class RoomStatus(str, Enum):
     AVAILABLE = "available"
     MAINTENANCE = "maintenance"
+    OCCUPIED = "occupied"
 
 
 class Student(BaseModel):
@@ -27,6 +28,7 @@ class Student(BaseModel):
     gender: GenderType = GenderType.MALE
     program: Optional[str] = None
     application_timestamp: Optional[str] = None  # ISO format timestamp
+    current_room_id: Optional[int] = None
 
 
 class Group(BaseModel):
@@ -51,6 +53,7 @@ class Room(BaseModel):
     capacity: int
     room_type: str = "double"
     status: RoomStatus = RoomStatus.AVAILABLE
+    match_priority: int = 0
 
 
 class AllocationRule(BaseModel):
@@ -76,17 +79,22 @@ class AllocationRequest(BaseModel):
     rules: List[AllocationRule]
     allocation_mode: str = "group_based"  # "group_based", "fcfs", or "wing_fcfs"
     roommate_invitations: List[RoommateInvitation] = []
+    # Phased allocation fields
+    locked_assignments: Dict[int, List[str]] = {}  # room_id -> [student_id, ...]
+    target_years: List[int] = []      # empty = all years (no filter)
+    target_programs: List[str] = []   # empty = all programs (no filter)
 
 
 class AllocationResult(BaseModel):
     student_id: str
-    room_id: int
-    hostel_name: str
-    room_number: str
+    room_id: Optional[int] = None
+    hostel_name: Optional[str] = None
+    room_number: Optional[str] = None
     wing: Optional[str] = None
     floor: Optional[int] = None
     group_id: Optional[int] = None
     happiness: int = 50  # 0-100 score
+    reason: Optional[str] = None
 
 
 class AllocationDecisionLog(BaseModel):

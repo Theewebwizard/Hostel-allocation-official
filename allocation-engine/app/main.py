@@ -58,7 +58,8 @@ async def fetch_data_from_core_services():
                     year=s['year'],
                     gender=GenderType(s.get('gender', 'male')),
                     program=s.get('program'),
-                    application_timestamp=s.get('applicationTimestamp')
+                    application_timestamp=s.get('applicationTimestamp'),
+                    current_room_id=s.get('currentRoomId')
                 )
                 for s in data.get('students', [])
             ]
@@ -76,7 +77,8 @@ async def fetch_data_from_core_services():
                             year=m['year'],
                             gender=GenderType(m.get('gender', 'male')),
                             program=m.get('program'),
-                            application_timestamp=m.get('applicationTimestamp')
+                            application_timestamp=m.get('applicationTimestamp'),
+                            current_room_id=m.get('currentRoomId')
                         )
                         for m in g.get('members', [])
                     ]
@@ -131,7 +133,7 @@ async def fetch_data_from_core_services():
             raise HTTPException(status_code=500, detail=f"Failed to process data: {str(e)}")
 
 
-async def run_allocation_task(run_id: str, rules: list, allocation_mode: str = "group_based"):
+async def run_allocation_task(run_id: str, request: AllocationRequest):
     """Background task to run allocation"""
     try:
         allocation_runs[run_id]["status"] = "running"
@@ -139,27 +141,41 @@ async def run_allocation_task(run_id: str, rules: list, allocation_mode: str = "
         # Fetch data from core services
         data = await fetch_data_from_core_services()
 
+        # Apply cohort filters (empty list = no filter, allocate everyone)
+        filtered_students = data["students"]
+        if request.target_years:
+            filtered_students = [s for s in filtered_students if s.year in request.target_years]
+        if request.target_programs:
+            filtered_students = [s for s in filtered_students if s.program in request.target_programs]
+
         # Create engine and run allocation
         engine = AllocationEngine(
-            students=data["students"],
+            students=filtered_students,
             groups=data["groups"],
             hostels=data["hostels"],
             rooms=data["rooms"],
-            rules=rules,
-            roommate_invitations=data["roommate_invitations"]
+            rules=request.rules,
+            roommate_invitations=data["roommate_invitations"],
+            locked_assignments=request.locked_assignments,
         )
 
-        results = engine.run_allocation(mode=allocation_mode)
+        results = engine.run_allocation(mode=request.allocation_mode)
 
         allocation_runs[run_id].update({
             "status": "completed",
             "results": results,
             "decision_logs": engine.decision_logs,
-            "total_students": len(data["students"]),
-            "allocated_students": len(results)
+            "total_students": len(filtered_students),
+            "allocated_students": len([r for r in results if r.room_id is not None])
         })
         
     except Exception as e:
+        import traceback
+        error_msg = f"Error in run_allocation_task: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        with open("engine_error.log", "a") as f:
+            f.write(error_msg + "\n")
+        
         allocation_runs[run_id].update({
             "status": "failed",
             "error": str(e)
@@ -188,8 +204,7 @@ async def trigger_allocation(request: AllocationRequest, background_tasks: Backg
     background_tasks.add_task(
         run_allocation_task,
         run_id,
-        request.rules,
-        request.allocation_mode
+        request
     )
     
     return {

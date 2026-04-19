@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In, Not, IsNull } from 'typeorm';
 import {
   Hostel,
   Room,
@@ -22,6 +22,8 @@ import {
   Student,
   WingParticipationSetting,
   SystemSetting,
+  AdministrativeAction,
+  ActionType,
 } from '../entities';
 import {
   CreateHostelDto,
@@ -58,6 +60,8 @@ export class AdminService {
     private wingParticipationRepository: Repository<WingParticipationSetting>,
     @InjectRepository(SystemSetting)
     private systemSettingRepository: Repository<SystemSetting>,
+    @InjectRepository(AdministrativeAction)
+    private actionRepository: Repository<AdministrativeAction>,
     private configService: ConfigService,
     private decisionsService: DecisionsService,
     private dataSource: DataSource,
@@ -311,15 +315,21 @@ export class AdminService {
   async triggerAllocation(
     userId: string,
     allocationMode: AllocationMode = AllocationMode.GROUP_BASED,
+    targetYears?: number[],
+    targetPrograms?: string[],
   ): Promise<AllocationRun> {
-    // Check if there's a finalized allocation run
-    const finalizedRun = await this.runRepository.findOne({
-      where: { finalized: true },
+    // Check if there's an un-finalized draft or running allocation
+    const pendingRun = await this.runRepository.findOne({
+      where: [
+        { status: AllocationRunStatus.QUEUED },
+        { status: AllocationRunStatus.RUNNING },
+        { status: AllocationRunStatus.COMPLETED, finalized: false }
+      ]
     });
 
-    if (finalizedRun) {
+    if (pendingRun) {
       throw new BadRequestException(
-        'Cannot trigger new allocation. A finalized allocation run already exists.',
+        'Cannot trigger new allocation. Please Publish & Commit (or delete) your current draft first.',
       );
     }
 
@@ -331,6 +341,8 @@ export class AdminService {
       triggeredById: userId,
       status: AllocationRunStatus.QUEUED,
       allocationMode,
+      targetYears: targetYears || null,
+      targetPrograms: targetPrograms || null,
       rulesSnapshot: rules.map((r) => ({
         id: r.id,
         hostelId: r.hostelId,
@@ -345,7 +357,7 @@ export class AdminService {
     await this.runRepository.save(run);
 
     // Trigger allocation engine asynchronously
-    this.callAllocationEngine(run.id, rules, allocationMode).catch((error) => {
+    this.callAllocationEngine(run.id, rules, allocationMode, targetYears, targetPrograms).catch((error) => {
       console.error('Allocation engine error:', error);
       this.updateRunStatus(run.id, AllocationRunStatus.FAILED, error.message);
     });
@@ -357,6 +369,8 @@ export class AdminService {
     runId: string,
     rules: AllocationRule[],
     allocationMode: AllocationMode,
+    targetYears?: number[],
+    targetPrograms?: string[],
   ): Promise<void> {
     const allocationEngineUrl = this.configService.get(
       'ALLOCATION_ENGINE_URL',
@@ -365,6 +379,17 @@ export class AdminService {
 
     try {
       await this.updateRunStatus(runId, AllocationRunStatus.RUNNING);
+
+      // Build locked_assignments map from all currently locked results
+      const lockedResults = await this.resultRepository.find({
+        where: { isLocked: true },
+      });
+      const lockedAssignments: Record<number, string[]> = {};
+      for (const r of lockedResults) {
+        if (r.roomId == null) continue;
+        if (!lockedAssignments[r.roomId]) lockedAssignments[r.roomId] = [];
+        lockedAssignments[r.roomId].push(r.studentId);
+      }
 
       const response = await fetch(`${allocationEngineUrl}/allocate`, {
         method: 'POST',
@@ -381,6 +406,9 @@ export class AdminService {
             priority: r.priority,
             wing: r.wing,
           })),
+          locked_assignments: lockedAssignments,
+          target_years: targetYears ?? [],
+          target_programs: targetPrograms ?? [],
         }),
       });
 
@@ -469,7 +497,7 @@ export class AdminService {
         wing: alloc.wing,
         floor: alloc.floor,
         groupId: alloc.group_id,
-        happiness: alloc.happiness || 50,
+        happiness: alloc.happiness ?? 50,
       });
 
       await this.resultRepository.save(result);
@@ -523,24 +551,26 @@ export class AdminService {
     return run;
   }
 
-  async finalizeAllocationRun(id: string): Promise<AllocationRun> {
-    const run = await this.getAllocationRunById(id);
-
-    if (run.status !== AllocationRunStatus.COMPLETED) {
-      throw new BadRequestException(
-        'Only completed allocation runs can be finalized',
-      );
+  async deleteAllocationRun(id: string) {
+    const run = await this.runRepository.findOne({ where: { id } });
+    if (!run) {
+      throw new NotFoundException('Allocation run not found');
     }
 
     if (run.finalized) {
-      throw new BadRequestException('Allocation run is already finalized');
+      throw new BadRequestException('Cannot delete a finalized allocation run');
     }
 
-    run.finalized = true;
-    return this.runRepository.save(run);
+    // Delete associated results first
+    await this.resultRepository.delete({ runId: id });
+    
+    // Delete the run record
+    await this.runRepository.remove(run);
+
+    return { message: 'Allocation run and associated results deleted successfully.' };
   }
 
-  async commitAllocationRun(id: string): Promise<{ message: string; count: number }> {
+  async publishAndCommitRun(id: string): Promise<{ message: string; count: number }> {
     return await this.dataSource.transaction(async (manager) => {
       // 1. Fetch the run
       const run = await manager.findOne(AllocationRun, { where: { id } });
@@ -548,24 +578,57 @@ export class AdminService {
         throw new NotFoundException('Allocation run not found');
       }
 
-      // If not finalized, finalize it first
-      if (!run.finalized) {
-        if (run.status !== AllocationRunStatus.COMPLETED) {
-          throw new BadRequestException('Only completed allocation runs can be committed');
-        }
-        run.finalized = true;
-        await manager.save(AllocationRun, run);
+      // Step A: Finalize
+      if (run.status !== AllocationRunStatus.COMPLETED) {
+        throw new BadRequestException('Only completed allocation runs can be published');
       }
+      if (run.finalized) {
+        throw new BadRequestException('Allocation run is already published');
+      }
+      run.finalized = true;
+      await manager.save(AllocationRun, run);
 
-      // 2. Get all distinct rooms from allocation results
+      // 2. Fetch all results for this run
       const results = await manager.find(AllocationResult, { where: { runId: id } });
-      const roomIds = [...new Set(results.map((r) => r.roomId))];
+      
+      // Filter for successful assignments (with a room)
+      const successfulResults = results.filter((r) => r.roomId != null);
 
-      if (roomIds.length === 0) {
-        return { message: 'No rooms to commit', count: 0 };
+      if (successfulResults.length === 0) {
+        return { message: 'Run published, but no assignments were found to commit.', count: 0 };
       }
 
-      // 3. Update all these rooms to occupied
+      // Step B: Lock Results (Sets isLocked = true to fence off from engine)
+      for (const res of successfulResults) {
+        res.isLocked = true;
+      }
+      await manager.save(AllocationResult, successfulResults);
+
+      // Step C: Commit Rooms (Update status to OCCUPIED)
+      const roomIds = [...new Set(successfulResults.map((r) => r.roomId))];
+      
+      // Vacate Old Rooms logic:
+      // Find the current room IDs of all students in this run
+      const studentIds = successfulResults.map((r) => r.studentId);
+      const studentEntities = await manager.find(Student, {
+        where: { userId: In(studentIds) },
+      });
+
+      const oldRoomIdsToVacate = studentEntities
+        .map((s) => s.currentRoomId)
+        .filter((id) => id !== null && !roomIds.includes(id));
+
+      // 1. Vacate old rooms that aren't being re-claimed in this run
+      if (oldRoomIdsToVacate.length > 0) {
+        await manager
+          .createQueryBuilder()
+          .update(Room)
+          .set({ status: RoomStatus.AVAILABLE })
+          .whereInIds(oldRoomIdsToVacate)
+          .execute();
+      }
+
+      // 2. Claim new rooms (OCCUPIED)
       await manager
         .createQueryBuilder()
         .update(Room)
@@ -573,9 +636,8 @@ export class AdminService {
         .whereInIds(roomIds)
         .execute();
 
-      // 4. Update student currentRoomId and allocatedRoomId
-      // We do this in a loop for each result to ensure each student gets their specific room
-      for (const res of results) {
+      // Step D: Commit Students (Update currentRoomId and allocatedRoomId)
+      for (const res of successfulResults) {
         await manager.update(
           Student,
           { userId: res.studentId },
@@ -586,10 +648,200 @@ export class AdminService {
         );
       }
 
+      // Step E: Reset Application Status for target cohorts
+      const resetQuery = manager
+        .createQueryBuilder()
+        .update(Student)
+        .set({
+          hasSubmitted: false,
+          applicationStatus: 'NONE',
+        });
+
+      if (run.targetYears && run.targetYears.length > 0) {
+        resetQuery.where('year IN (:...years)', { years: run.targetYears });
+      }
+
+      await resetQuery.execute();
+
+      // Capture Pre-Commit Snapshot for Undo
+      const studentEntitiesInCohort = await manager.find(Student, {
+        where: run.targetYears && run.targetYears.length > 0 
+          ? { year: In(run.targetYears) } 
+          : {}
+      });
+      
+      const snapshot: Record<string, number | null> = {};
+      for (const s of studentEntitiesInCohort) {
+        snapshot[s.userId] = s.currentRoomId;
+      }
+
+      // Step F: Log the action
+      const actionLog = this.actionRepository.create({
+        actionType: ActionType.ALLOCATION,
+        performedBy: 'WARDEN_ADMIN',
+        description: `Allocation Run Committed (${successfulResults.length} students)`,
+        snapshot: snapshot,
+      });
+      await manager.save(AdministrativeAction, actionLog);
+
       return {
-        message: 'Allocation run committed successfully',
-        count: roomIds.length,
+        message: 'Allocation published and committed successfully.',
+        count: successfulResults.length,
       };
+    });
+  }
+
+  async bulkEvictStudents(rollNumbers: string[]) {
+    return await this.dataSource.transaction(async (manager) => {
+      // 1. Find students
+      const students = await manager.find(Student, {
+        where: rollNumbers.map((rn) => ({ rollNumber: rn })),
+      });
+
+      if (students.length === 0) {
+        throw new BadRequestException('No students found for the provided roll numbers');
+      }
+
+      const studentIds = students.map((s) => s.userId);
+
+      // 2. Find their allocation results (active assignments)
+      const results = await manager.find(AllocationResult, {
+        where: studentIds.map((sid) => ({ studentId: sid, roomId: Not(IsNull()) })),
+      });
+
+      const summary: any[] = [];
+      const roomIdsToFree: number[] = [];
+
+      for (const student of students) {
+        const result = results.find((r) => r.studentId === student.userId);
+        if (result) {
+          summary.push({
+            rollNumber: student.rollNumber,
+            fullName: student.fullName,
+            roomNumber: result.roomNumber,
+            hostelName: result.hostelName,
+          });
+          roomIdsToFree.push(result.roomId);
+        }
+      }
+
+      if (roomIdsToFree.length > 0) {
+        // Step A: Mark rooms as available
+        await manager
+          .createQueryBuilder()
+          .update(Room)
+          .set({ status: RoomStatus.AVAILABLE })
+          .whereInIds([...new Set(roomIdsToFree)])
+          .execute();
+
+        // Step B: Delete allocation results (removes the "locked" bed from engine view)
+        await manager.delete(AllocationResult, {
+          id: In(results.map((r) => r.id)),
+        });
+
+        // Step C: Clear student room profiles
+        await manager.update(
+          Student,
+          { userId: In(studentIds) },
+          {
+            currentRoomId: null,
+            allocatedRoomId: null,
+            hasSubmitted: false,
+            applicationStatus: 'NONE',
+          },
+        );
+      }
+
+      // Step D: Log the action for Undo
+      const snapshot: Record<string, number | null> = {};
+      for (const s of students) {
+        snapshot[s.userId] = s.currentRoomId;
+      }
+
+      const actionLog = this.actionRepository.create({
+        actionType: ActionType.EVICTION,
+        performedBy: 'WARDEN_ADMIN',
+        description: `Bulk Eviction of ${students.length} students`,
+        snapshot: snapshot,
+      });
+      await manager.save(AdministrativeAction, actionLog);
+
+      return {
+        message: `Successfully evicted ${summary.length} students.`,
+        summary,
+      };
+    });
+  }
+
+  async resetApplicationStatus(year?: number) {
+    const updateQuery = this.studentRepository
+      .createQueryBuilder()
+      .update(Student)
+      .set({
+        hasSubmitted: false,
+        applicationStatus: 'NONE',
+      });
+
+    if (year) {
+      updateQuery.where('year = :year', { year });
+    }
+
+    await updateQuery.execute();
+    return {
+      message: `Application status reset successfully for ${year ? `Year ${year}` : 'all students'}.`,
+    };
+  }
+
+  async getAdminActions(): Promise<AdministrativeAction[]> {
+    return this.actionRepository.find({
+      order: { timestamp: 'DESC' },
+      take: 20,
+    });
+  }
+
+  async rollbackAction(actionId: string) {
+    return await this.dataSource.transaction(async (manager) => {
+      const action = await manager.findOne(AdministrativeAction, { where: { id: actionId } });
+      if (!action) throw new NotFoundException('Action log not found');
+      if (action.isReverted) throw new BadRequestException('Action already reverted');
+
+      const snapshot = action.snapshot;
+      const studentIds = Object.keys(snapshot);
+
+      // 1. Identify all rooms that will be involved
+      // Current rooms (to be vacated)
+      const students = await manager.find(Student, { where: { userId: In(studentIds) } });
+      const roomsToVacate = students
+        .map(s => s.currentRoomId)
+        .filter(id => id !== null) as number[];
+      
+      // Previous rooms (to be re-occupied)
+      const roomsToOccupy = Object.values(snapshot)
+        .filter(id => id !== null) as number[];
+
+      // 2. Restore students
+      for (const studentId of studentIds) {
+        const previousRoomId = snapshot[studentId];
+        await manager.update(Student, { userId: studentId }, {
+          currentRoomId: previousRoomId,
+          allocatedRoomId: previousRoomId,
+          hasSubmitted: action.actionType === ActionType.EVICTION, // Restore application if rolling back eviction
+        });
+      }
+
+      // 3. Reset room statuses
+      if (roomsToVacate.length > 0) {
+        await manager.update(Room, roomsToVacate, { status: RoomStatus.AVAILABLE });
+      }
+      if (roomsToOccupy.length > 0) {
+        await manager.update(Room, roomsToOccupy, { status: RoomStatus.OCCUPIED });
+      }
+
+      // 4. Mark action as reverted
+      action.isReverted = true;
+      await manager.save(AdministrativeAction, action);
+
+      return { message: 'Rollback completed successfully' };
     });
   }
 
@@ -598,6 +850,114 @@ export class AdminService {
       where: { runId },
       relations: ['student', 'room', 'group'],
       order: { happiness: 'DESC' },
+    });
+  }
+
+  async getRulesMatrix() {
+    const rules = await this.ruleRepository.find();
+    const hostels = await this.hostelRepository.find({ relations: ['rooms'] });
+
+    const matrix: Record<
+      number,
+      {
+        years: Record<number, boolean>;
+        wings: Record<string, Record<number, boolean>>;
+      }
+    > = {};
+
+    // Initialize matrix with hostels and their wings
+    for (const hostel of hostels) {
+      const wings = [
+        ...new Set(hostel.rooms.map((r) => r.wing).filter((w) => !!w)),
+      ];
+      matrix[hostel.id] = {
+        years: {},
+        wings: wings.reduce((acc, wing) => ({ ...acc, [wing!]: {} }), {}),
+      };
+    }
+
+    for (const rule of rules) {
+      if (rule.hostelId === null || rule.year === null) continue;
+      if (!matrix[rule.hostelId]) continue; // Skip if hostel no longer exists
+
+      if (rule.wing === null || rule.wing === '') {
+        matrix[rule.hostelId].years[rule.year] = rule.isAllowed;
+      } else {
+        if (!matrix[rule.hostelId].wings[rule.wing]) {
+          matrix[rule.hostelId].wings[rule.wing] = {};
+        }
+        matrix[rule.hostelId].wings[rule.wing][rule.year] = rule.isAllowed;
+      }
+    }
+
+    return matrix;
+  }
+
+  async saveRulesMatrix(
+    matrix: Record<
+      number,
+      {
+        years: Record<number, boolean>;
+        wings: Record<string, Record<number, boolean>>;
+      }
+    >,
+  ) {
+    return await this.dataSource.transaction(async (manager) => {
+      // 1. Wipe existing rules
+      await manager.delete(AllocationRule, {});
+
+      // 2. Generate new rules
+      const newRules: AllocationRule[] = [];
+      for (const hostelIdStr of Object.keys(matrix)) {
+        const hostelId = parseInt(hostelIdStr);
+        const config = matrix[hostelId];
+
+        // Hostel-wide rules
+        for (const yearStr of Object.keys(config.years)) {
+          const year = parseInt(yearStr);
+          if (config.years[year]) {
+            newRules.push(
+              manager.create(AllocationRule, {
+                hostelId,
+                year,
+                isAllowed: true,
+                priority: 10,
+                description: `Auto: Year ${year} in Hostel ID ${hostelId}`,
+                wing: null,
+              }),
+            );
+          }
+        }
+
+        // Wing-specific rules
+        for (const wingName of Object.keys(config.wings)) {
+          const yearMap = config.wings[wingName];
+          for (const yearStr of Object.keys(yearMap)) {
+            const year = parseInt(yearStr);
+            if (yearMap[year]) {
+              newRules.push(
+                manager.create(AllocationRule, {
+                  hostelId,
+                  year,
+                  isAllowed: true,
+                  priority: 10,
+                  description: `Auto: Year ${year} in Wing ${wingName} (Hostel ID ${hostelId})`,
+                  wing: wingName,
+                }),
+              );
+            }
+          }
+        }
+      }
+
+      if (newRules.length > 0) {
+        await manager.save(AllocationRule, newRules);
+      }
+
+      return {
+        message: 'Hierarchical rules matrix saved successfully',
+        count: newRules.length,
+      };
     });
   }
 
