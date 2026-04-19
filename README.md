@@ -173,6 +173,459 @@ JWT_SECRET=your-secret-key
 JWT_EXPIRATION=7d
 ```
 
+# Software Development Plan Updates (March 2026)
+
+## 1. Dynamic State-Driven Allocation Model
+
+The allocation system has been upgraded from a one-time static allocation flow into a dynamic, rolling allocation engine.
+
+Previously, any student with an existing `currentRoomId` was excluded from future allocation runs. This prevented:
+
+- Mid-semester room upgrades
+- Reallocation after vacancies appear
+- Re-application after eviction
+- Selective reopening for specific years/programs
+
+To solve this, allocation state is now explicitly separated from physical room assignment.
+
+### Student Allocation State
+
+The system now distinguishes between:
+
+- Physical State → the room currently occupied
+- Allocation State → whether the student should participate in the next allocation cycle
+
+New capabilities:
+
+- Students may already have a room and still re-apply
+- Administrators can reopen applications by year/program
+- Students can be relocated only if a better room is found
+- Allocation commits and evictions can be rolled back
+
+---
+
+## 2. Database Schema Changes
+
+### Student Entity
+
+Added the following fields:
+
+```text
+hasSubmitted BOOLEAN NOT NULL DEFAULT false
+applicationStatus VARCHAR NOT NULL DEFAULT 'NONE'
+```
+
+Purpose:
+
+- `hasSubmitted` controls whether the student is included in allocation
+- `applicationStatus` tracks the current phase of the student's request
+
+Example values:
+
+```text
+NONE
+PENDING
+UPGRADE_REQUESTED
+WAITLISTED
+```
+
+### AllocationRun Entity
+
+Added:
+
+```text
+targetYears INTEGER[]
+targetPrograms TEXT[]
+```
+
+Purpose:
+
+- Tracks which cohort was targeted in the allocation run
+- Enables selective reset of only those students after commit
+
+Example:
+
+```json
+{
+  "targetYears": [1, 4],
+  "targetPrograms": ["CSE", "ECE"]
+}
+```
+
+### AllocationRule Entity
+
+Added:
+
+```text
+wingName VARCHAR NULL
+```
+
+This extends rule targeting from hostel level to hostel + wing level.
+
+Example:
+
+```text
+Hostel: BH1
+Wing: E
+Year: 1
+Allowed: true
+Priority: 100
+```
+
+This enables:
+
+- Wing E reserved for first-year students
+- Wings A/B reserved for fourth-year students
+- Fine-grained co-ed / mixed building policies
+
+### AdministrativeAction Entity (New)
+
+A new table was added:
+
+```text
+administrative_actions
+```
+
+Schema:
+
+```text
+id UUID PRIMARY KEY
+actionType ENUM('EVICTION', 'ALLOCATION_COMMIT')
+performedBy UUID
+timestamp TIMESTAMPTZ
+snapshot JSONB
+```
+
+Example snapshot:
+
+```json
+{
+  "student_101": "room_12",
+  "student_102": "room_13"
+}
+```
+
+Purpose:
+
+- Stores the exact student → room mapping before a major admin action
+- Enables rollback of evictions and commits
+
+---
+
+## 3. Backend Changes (NestJS)
+
+### Allocation Commit Enhancements
+
+The `publishAndCommitRun` flow was redesigned.
+
+New behavior:
+
+1. Before commit, capture the current room state of all affected students
+2. Save the snapshot into `AdministrativeAction`
+3. Commit all room changes inside one SQL transaction
+4. Update old room status to `AVAILABLE`
+5. Update new room status to `OCCUPIED`
+6. Reset targeted students after successful commit
+
+Example reset logic:
+
+```ts
+student.hasSubmitted = false;
+student.applicationStatus = 'NONE';
+```
+
+### Bulk Eviction Enhancements
+
+`bulkEvictStudents` now:
+
+- Captures a rollback snapshot before eviction
+- Clears student room assignments
+- Resets `hasSubmitted = false`
+- Stores the action in `AdministrativeAction`
+
+### Rollback API
+
+New rollback support added.
+
+Endpoint:
+
+```text
+POST /admin/actions/:id/rollback
+```
+
+Behavior:
+
+- Loads snapshot JSON from `AdministrativeAction`
+- Restores student room assignments
+- Fixes room statuses automatically
+- Executes everything transactionally
+
+### Reset Application Status Endpoint
+
+New endpoint:
+
+```text
+POST /admin/allocation/reset-status
+```
+
+Optional request:
+
+```json
+{
+  "year": 2
+}
+```
+
+Purpose:
+
+- Allows wardens to reopen allocation for a specific year
+
+### Allocation Draft Deletion
+
+New endpoint:
+
+```text
+DELETE /admin/allocation/runs/:id
+```
+
+Purpose:
+
+- Delete failed / unfinished allocation runs
+- Prevent admins from getting stuck with invalid drafts
+
+---
+
+## 4. Rules Matrix System
+
+The old flat rule list has been replaced with a hierarchical eligibility matrix.
+
+Structure:
+
+```json
+{
+  "BH1": {
+    "_all": {
+      "1": true,
+      "2": false,
+      "3": false,
+      "4": true
+    },
+    "wings": {
+      "A": {
+        "4": true
+      },
+      "B": {
+        "4": true
+      },
+      "E": {
+        "1": true
+      }
+    }
+  }
+}
+```
+
+Backend translation strategy:
+
+1. Delete all previous rules
+2. Traverse the matrix
+3. Generate new `AllocationRule` rows
+4. Automatically assign priorities
+
+This ensures there are no stale or conflicting rules.
+
+---
+
+## 5. Allocation Engine Changes (Python)
+
+### Highest Priority Wins
+
+The engine previously allowed lower-priority rules to override higher-priority rules.
+
+Example problem:
+
+```text
+Priority 100 → Allow BH1 Wing A for 4th year
+Priority 10  → Deny BH1 entirely
+```
+
+The lower-priority deny incorrectly won.
+
+Now:
+
+1. Collect all matching rules
+2. Sort descending by priority
+3. Evaluate only the first rule
+4. Immediately return its decision
+
+Pseudo-code:
+
+```python
+rules = sorted(matching_rules, key=lambda r: r.priority, reverse=True)
+
+for rule in rules:
+    return rule.is_allowed
+```
+
+### Relocatable Student Logic
+
+Students with existing rooms can now still participate in allocation.
+
+Input example:
+
+```json
+{
+  "studentId": 42,
+  "currentRoomId": 15,
+  "relocatable_from": 15
+}
+```
+
+Engine behavior:
+
+- Temporarily marks room 15 as available
+- Searches for a better room
+- Only moves student if a higher-priority room exists
+- Otherwise automatically restores original room
+
+This prevents accidental displacement.
+
+---
+
+# README.md Updates
+
+## Updated Features
+
+### For Students
+
+- Register/login with JWT auth
+- Manage profile (roll number, year, gender, program)
+- Create and manage groups
+- Invite students with consent-based workflow
+- Submit new applications even after already having a room
+- Participate in rolling allocation cycles
+- Receive reset eligibility after warden approval
+- View and respond to swap requests
+
+### For Wardens/Admin
+
+- Manage hostels, wings, floors, and rooms
+- Configure eligibility using Rules Matrix UI
+- Run allocations in `group_based` or `fcfs`
+- Commit allocations directly to live room assignments
+- Reset application status by year/program
+- Delete failed draft runs
+- View rollback logs
+- Revert accidental commits/evictions
+- Automatically update room statuses during swaps/upgrades
+
+### Allocation Intelligence
+
+- Two-stage CSP + Bin Packing algorithm
+- Highest-priority-wins rule engine
+- Wing-level hostel rules
+- Smart relocation support
+- Rollback-safe allocation commits
+- Group cohesion optimization
+- Automatic fallback to previous room if no better room exists
+
+## Dynamic Allocation Flow
+
+```text
+Student already has a room
+        ↓
+Student submits upgrade request
+        ↓
+hasSubmitted = true
+        ↓
+Student is included in allocation again
+        ↓
+Current room becomes temporarily available
+        ↓
+If better room found → move student
+Else → keep original room
+```
+
+## New API Endpoints
+
+### Allocation Endpoints
+
+```text
+POST   /admin/allocation/run
+POST   /admin/allocation/commit/:runId
+DELETE /admin/allocation/runs/:id
+POST   /admin/allocation/reset-status
+POST   /admin/actions/:id/rollback
+```
+
+### Rules Matrix Endpoints
+
+```text
+GET  /admin/rules/matrix
+POST /admin/rules/matrix
+```
+
+## Example Rules Matrix Payload
+
+```json
+{
+  "BH1": {
+    "_all": {
+      "1": true,
+      "2": false,
+      "3": false,
+      "4": true
+    },
+    "wings": {
+      "A": {
+        "4": true
+      },
+      "B": {
+        "4": true
+      },
+      "E": {
+        "1": true
+      }
+    }
+  }
+}
+```
+
+## Delivery Status (March 2026)
+
+### Completed
+
+- Authentication and profile management
+- Consent-based groups
+- Rules Matrix UI
+- Wing-level allocation rules
+- Smart relocation / upgrade logic
+- Rolling allocation cycles
+- Allocation commit + room status synchronization
+- Bulk eviction + rollback
+- Delete draft runs
+- System logs and rollback history
+- Dashboard unlock using `hasSubmitted`
+
+### Partially Complete
+
+- Notification microservice
+- RabbitMQ integration
+- Redis caching
+- Drag-and-drop override UI
+
+### Not Started
+
+- Maintenance request module
+- Communication hub
+- Payments integration
+- Inventory management
+- AI analytics
+
+Estimated MVP completion: **~90%**
+
+Estimated long-term roadmap completion: **~58%**
+
 ## 📄 License
 
 MIT License
