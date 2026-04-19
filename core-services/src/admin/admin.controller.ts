@@ -292,6 +292,21 @@ export class AdminController {
     return this.adminService.setAllocationPolicy(dto.policy);
   }
 
+  @Get('applications-enabled')
+  @ApiOperation({ summary: 'Check if student applications are enabled' })
+  @ApiResponse({ status: 200, description: 'Application status' })
+  async getApplicationsEnabled() {
+    const enabled = await this.adminService.getApplicationsEnabled();
+    return { enabled };
+  }
+
+  @Post('applications-enabled')
+  @ApiOperation({ summary: 'Enable or disable student applications' })
+  @ApiResponse({ status: 200, description: 'Status updated' })
+  async setApplicationsEnabled(@Body() dto: { enabled: boolean }) {
+    return this.adminService.setApplicationsEnabled(dto.enabled);
+  }
+
   @Get('groups')
   @ApiOperation({ summary: 'Get all groups for auditing (admin only)' })
   @ApiResponse({ status: 200, description: 'Groups retrieved successfully' })

@@ -23,6 +23,7 @@ import {
   ArrowLeftRight,
   Info,
   LayoutGrid,
+  ClipboardCheck,
 } from "lucide-react";
 import { Tooltip } from "react-tooltip";
 import {
@@ -146,6 +147,12 @@ export default function AdminPage() {
     useState<AllocationPolicy>("group_based");
   const [isSavingPolicy, setIsSavingPolicy] = useState(false);
 
+  // Application Control
+  const [applicationsEnabled, setApplicationsEnabledState] = useState(true);
+  const [savedApplicationsEnabled, setSavedApplicationsEnabled] =
+    useState(true);
+  const [isSavingAppStatus, setIsSavingAppStatus] = useState(false);
+
   // Form data
   const [hostelForm, setHostelForm] = useState({
     name: "",
@@ -235,6 +242,7 @@ export default function AdminPage() {
         policyRes,
         groupsRes,
         hierarchyRes,
+        appStatusRes,
       ] = await Promise.all([
         adminApi.getDashboardStats(),
         adminApi.getAllHostels(),
@@ -248,6 +256,7 @@ export default function AdminPage() {
         adminApi.getAllocationPolicy().catch(() => ({ data: { policy: "group_based" as AllocationPolicy } })),
         adminApi.getAllGroups().catch(() => ({ data: [] })),
         adminApi.getHostelHierarchy().catch(() => ({ data: [] })),
+        adminApi.getApplicationsEnabled().catch(() => ({ data: { enabled: true } })),
       ]);
       setStats(statsRes.data);
       setHostels(hostelsRes.data);
@@ -261,6 +270,8 @@ export default function AdminPage() {
       setWingSettings(wingRes.data || []);
       setAllocationPolicyState(policyRes.data.policy || "group_based");
       setSavedAllocationPolicy(policyRes.data.policy || "group_based");
+      setApplicationsEnabledState(appStatusRes.data.enabled ?? true);
+      setSavedApplicationsEnabled(appStatusRes.data.enabled ?? true);
       setGroups(groupsRes.data || []);
     } catch (err: any) {
       if (err.response?.status !== 401) {
@@ -744,10 +755,10 @@ export default function AdminPage() {
                       <div className="space-y-4">
                         <p className="text-sm font-bold text-slate-700  flex items-center gap-2">
                           <LayoutGrid className="w-4 h-4" />
-                          Floors: {hostel.floors.length}
+                          Floors: {hostel.floors?.length || 0}
                         </p>
                         <div className="space-y-3">
-                          {hostel.floors.map((floor: any) => (
+                          {hostel.floors?.map((floor: any) => (
                             <div
                               key={floor.floor}
                               className="p-3 bg-slate-50  rounded-lg border border-slate-100 "
@@ -2642,6 +2653,75 @@ export default function AdminPage() {
                         {allocationPolicy.replace("_", " ").toUpperCase()}
                       </span>
                     </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-amber-100 bg-amber-50/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-slate-900">
+                    <ClipboardCheck className="w-5 h-5 text-amber-600" />
+                    Application Window Control
+                  </CardTitle>
+                  <CardDescription>
+                    Enable or disable the "Submit Application" button for students. 
+                    This allows you to control exactly when students can start applying.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-amber-100">
+                    <div>
+                      <p className="font-bold text-slate-900">
+                        Allow Submissions
+                      </p>
+                      <p className="text-sm text-slate-500">
+                        {applicationsEnabled 
+                          ? "Students can currently submit their official applications." 
+                          : "Students cannot submit applications. The button is disabled."}
+                      </p>
+                    </div>
+                    <Button
+                      variant={applicationsEnabled ? "default" : "outline"}
+                      onClick={() => setApplicationsEnabledState(!applicationsEnabled)}
+                      className={applicationsEnabled ? "bg-green-600 hover:bg-green-700" : ""}
+                    >
+                      {applicationsEnabled ? "Enabled" : "Disabled"}
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-4 pt-2">
+                    <Button
+                      onClick={async () => {
+                        setIsSavingAppStatus(true);
+                        setError("");
+                        setSuccess("");
+                        try {
+                          await adminApi.setApplicationsEnabled(applicationsEnabled);
+                          setSavedApplicationsEnabled(applicationsEnabled);
+                          setSuccess(
+                            `Application submission ${applicationsEnabled ? "enabled" : "disabled"} successfully.`
+                          );
+                        } catch (err: any) {
+                          setError(
+                            err.response?.data?.message ||
+                              "Failed to save application status",
+                          );
+                        } finally {
+                          setIsSavingAppStatus(false);
+                        }
+                      }}
+                      disabled={isSavingAppStatus || applicationsEnabled === savedApplicationsEnabled}
+                      className="px-8"
+                    >
+                      {isSavingAppStatus ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save Status"
+                      )}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>

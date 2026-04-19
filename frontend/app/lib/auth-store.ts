@@ -1,17 +1,11 @@
 import { create } from "zustand";
-import { authApi, type AuthResponse } from "./api";
+import { authApi, type Student } from "./api";
 
 interface User {
   id: string;
   email: string;
   role: "student" | "warden";
-  student?: {
-    rollNumber: string;
-    fullName: string;
-    year: number;
-    program: string;
-    gender?: "male" | "female";
-  };
+  student?: Student;
 }
 
 interface AuthState {

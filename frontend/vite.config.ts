@@ -47,6 +47,10 @@ export default defineConfig({
           return undefined; // Proxy to backend
         },
       },
+      "/roommate-invitations": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
     },
   },
 });

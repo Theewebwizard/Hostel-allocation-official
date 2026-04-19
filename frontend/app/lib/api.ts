@@ -314,6 +314,12 @@ export const adminApi = {
   // Groups for Admin
   getAllGroups: () => api.get<any[]>("/admin/groups"),
   getHostelHierarchy: () => api.get<any[]>("/admin/hostels/hierarchy"),
+
+  // Application Control
+  getApplicationsEnabled: () =>
+    api.get<{ enabled: boolean }>("/admin/applications-enabled"),
+  setApplicationsEnabled: (enabled: boolean) =>
+    api.post<{ enabled: boolean }>("/admin/applications-enabled", { enabled }),
 };
 
 export const allocationApi = {

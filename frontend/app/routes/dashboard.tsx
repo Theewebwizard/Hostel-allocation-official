@@ -66,6 +66,7 @@ function StudentDashboard() {
   const [currentRoom, setCurrentRoom] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [appsEnabled, setAppsEnabled] = useState(true);
 
   const handleApply = async () => {
     if (
@@ -93,10 +94,11 @@ function StudentDashboard() {
   useEffect(() => {
     const fetchStudentData = async () => {
       try {
-        const [groupRes, invitationsRes, meRes] = await Promise.all([
+        const [groupRes, invitationsRes, meRes, statusRes] = await Promise.all([
           groupsApi.getMyGroup(),
           groupsApi.getMyInvitations(),
           studentsApi.getMe(),
+          adminApi.getApplicationsEnabled().catch(() => ({ data: { enabled: true } })),
         ]);
 
         if (groupRes.data) {
@@ -107,6 +109,7 @@ function StudentDashboard() {
         if (meRes.data?.currentRoom) {
           setCurrentRoom(meRes.data.currentRoom);
         }
+        setAppsEnabled(statusRes.data.enabled ?? true);
       } catch (err) {
         console.error("Failed to fetch dashboard data", err);
       }
@@ -144,15 +147,15 @@ function StudentDashboard() {
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium text-amber-600 flex items-center gap-1">
                 <Clock className="w-4 h-4" />
-                Hostel application not submitted yet!
+                {!appsEnabled ? "Hostel applications are currently closed." : "Hostel application not submitted yet!"}
               </p>
               <Button
                 onClick={handleApply}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !appsEnabled}
                 className="w-full"
                 size="sm"
               >
-                {isSubmitting ? "Submitting..." : "Submit Application Now"}
+                {!appsEnabled ? "Submissions Closed" : isSubmitting ? "Submitting..." : "Submit Application Now"}
               </Button>
               {submitError && (
                 <p className="text-xs text-red-500 mt-1">{submitError}</p>

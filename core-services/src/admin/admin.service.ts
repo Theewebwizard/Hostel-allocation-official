@@ -787,4 +787,37 @@ export class AdminService {
 
     return { policy };
   }
+
+  // ============ SYSTEM SETTINGS (APPLICATIONS ENABLED) ============
+
+  async getApplicationsEnabled(): Promise<boolean> {
+    const setting = await this.systemSettingRepository.findOne({
+      where: { key: 'applicationsEnabled' },
+    });
+    // Default to true if not set (to avoid blocking during setup)
+    return setting ? setting.value === 'true' : true;
+  }
+
+  async setApplicationsEnabled(
+    enabled: boolean,
+  ): Promise<{ enabled: boolean }> {
+    const existing = await this.systemSettingRepository.findOne({
+      where: { key: 'applicationsEnabled' },
+    });
+
+    const value = enabled ? 'true' : 'false';
+
+    if (existing) {
+      existing.value = value;
+      await this.systemSettingRepository.save(existing);
+    } else {
+      const setting = this.systemSettingRepository.create({
+        key: 'applicationsEnabled',
+        value: value,
+      });
+      await this.systemSettingRepository.save(setting);
+    }
+
+    return { enabled };
+  }
 }

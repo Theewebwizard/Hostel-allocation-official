@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, IsNull } from 'typeorm';
-import { Student } from '../entities';
+import { Student, SystemSetting } from '../entities';
 import { UpdateStudentDto } from './dto/update-student.dto';
 
 @Injectable()
@@ -9,6 +9,8 @@ export class StudentsService {
   constructor(
     @InjectRepository(Student)
     private studentRepository: Repository<Student>,
+    @InjectRepository(SystemSetting)
+    private systemSettingRepository: Repository<SystemSetting>,
   ) {}
 
   async findAll() {
@@ -64,6 +66,17 @@ export class StudentsService {
   }
 
   async apply(userId: string) {
+    const setting = await this.systemSettingRepository.findOne({
+      where: { key: 'applicationsEnabled' },
+    });
+    const enabled = setting ? setting.value === 'true' : true;
+
+    if (!enabled) {
+      throw new ForbiddenException(
+        'Hostel applications are currently closed by the administration.',
+      );
+    }
+
     return this.studentRepository.update(userId, {
       applicationTimestamp: new Date(),
     });
