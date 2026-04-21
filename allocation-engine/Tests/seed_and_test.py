@@ -150,39 +150,41 @@ def create_allocation_rules():
     hostels = session.get(f"{NEST_API}/admin/hostels").json()
     hm = {h['name']: h['id'] for h in hostels}
     
+    # Verify all hostels exist
+    required_hostels = ['BH1', 'BH2', 'BH3', 'BH4', 'GH1']
+    missing = [h for h in required_hostels if h not in hm]
+    if missing:
+        print(f"⚠️ Warning: Missing hostels in DB: {missing}")
+        return
+
     # Hierarchical Matrix Setup
-    # - BH1: Year 4 by default, but Wing E is for Year 1
-    # - BH2: Wing C for Year 1, Wing D for Year 4
-    # - BH3: Year 3 only
-    # - BH4: Year 2 only
-    # - GH1: All years allowed
     matrix = {
-        str(hm.get('BH1')): {
+        str(hm['BH1']): {
             "years": {4: True},
             "wings": {"E": {1: True}}
         },
-        str(hm.get('BH2')): {
+        str(hm['BH2']): {
             "years": {},
             "wings": {
                 "C": {1: True},
                 "D": {4: True}
             }
         },
-        str(hm.get('BH3')): {
+        str(hm['BH3']): {
             "years": {3: True},
             "wings": {}
         },
-        str(hm.get('BH4')): {
+        str(hm['BH4']): {
             "years": {2: True},
             "wings": {}
         },
-        str(hm.get('GH1')): {
+        str(hm['GH1']): {
             "years": {1: True, 2: True, 3: True, 4: True},
             "wings": {}
         }
     }
     
-    res = session.post(f"{NEST_API}/admin/rules/matrix", json=matrix)
+    res = session.post(f"{NEST_API}/admin/rules/matrix", json={"matrix": matrix})
     if res.status_code in [200, 201]:
         print(f"✅ Rules matrix configured: {res.json().get('count')} rules generated.")
     else:

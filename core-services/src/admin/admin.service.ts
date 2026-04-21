@@ -903,8 +903,12 @@ export class AdminService {
     >,
   ) {
     return await this.dataSource.transaction(async (manager) => {
-      // 1. Wipe existing rules
-      await manager.delete(AllocationRule, {});
+      // 1. Wipe existing rules using QueryBuilder (avoids "Empty criteria" error)
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(AllocationRule)
+        .execute();
 
       // 2. Generate new rules
       const newRules: AllocationRule[] = [];
