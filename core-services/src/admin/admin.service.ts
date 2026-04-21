@@ -693,11 +693,12 @@ export class AdminService {
           : {}
       });
       
-      const snapshot: Record<string, { roomId: number | null; applicationStatus: string }> = {};
+      const snapshot: Record<string, { roomId: number | null; applicationStatus: string; hasSubmitted: boolean }> = {};
       for (const s of studentEntitiesInCohort) {
         snapshot[s.userId] = {
           roomId: s.currentRoomId,
           applicationStatus: s.applicationStatus,
+          hasSubmitted: s.hasSubmitted,
         };
       }
 
@@ -793,11 +794,12 @@ export class AdminService {
       }
 
       // Step D: Log the action for Undo
-      const snapshot: Record<string, { roomId: number | null; applicationStatus: string }> = {};
+      const snapshot: Record<string, { roomId: number | null; applicationStatus: string; hasSubmitted: boolean }> = {};
       for (const s of students) {
         snapshot[s.userId] = {
           roomId: s.currentRoomId,
           applicationStatus: s.applicationStatus,
+          hasSubmitted: s.hasSubmitted,
         };
       }
 
@@ -848,7 +850,7 @@ export class AdminService {
       if (!action) throw new NotFoundException('Action log not found');
       if (action.isReverted) throw new BadRequestException('Action already reverted');
 
-      const snapshot = action.snapshot as Record<string, { roomId: number | null; applicationStatus: string }>;
+      const snapshot = action.snapshot as Record<string, { roomId: number | null; applicationStatus: string; hasSubmitted: boolean }>;
       const studentIds = Object.keys(snapshot);
 
       // 1. Identify all rooms that will be involved
@@ -870,9 +872,7 @@ export class AdminService {
           currentRoomId: previousState.roomId,
           allocatedRoomId: previousState.roomId,
           applicationStatus: previousState.applicationStatus,
-          // If we rollback eviction, they should be back to "Submitted" (true)
-          // If we rollback allocation, they should be back to "Submitted" (true) as they were in the pool
-          hasSubmitted: true, 
+          hasSubmitted: previousState.hasSubmitted, 
         });
       }
 

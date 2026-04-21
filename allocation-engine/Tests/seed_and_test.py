@@ -257,7 +257,7 @@ def generate_students_and_groups(mode="group_based"):
     print(f"\n🎓 Generating Students & Groups (Exactly 240) for mode: {mode}...")
     GROUP_CONFIGS = [
         # Year 1 (BH1 C,D,E): 90 students
-        {"year": 1, "gender": "male", "sizes": [1, 2, 3], "distribution": [0.2, 0.4, 0.4], "count": 40}, # ~90 students total if sizes average ~2.25
+        {"year": 1, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 90}, 
         # Year 2 (BH4): 140 students
         {"year": 2, "gender": "male", "sizes": [1, 2], "distribution": [0.3, 0.7], "count": 80}, # ~140 students
         # Year 3 (BH2 C,D): 60 students
@@ -265,11 +265,11 @@ def generate_students_and_groups(mode="group_based"):
         # Year 4 (BH1 A,B + BH2 A,B): 10 + 30 = 40 students
         {"year": 4, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 40},
         # BH3 Shared (160 beds): Let's add 160 more students across years
-        {"year": 1, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 40}, # 80 students
+        {"year": 1, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 80}, 
         {"year": 3, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 40}, # 80 students
         # Female Students (GH1): 20 beds
-        {"year": 1, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 5}, # 10
-        {"year": 4, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 5}, # 10
+        {"year": 1, "gender": "female", "sizes": [1], "distribution": [1.0], "count": 10}, 
+        {"year": 4, "gender": "female", "sizes": [1], "distribution": [1.0], "count": 10}, 
     ]
 
     uid = str(uuid.uuid4())[:4]
