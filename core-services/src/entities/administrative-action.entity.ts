@@ -33,8 +33,10 @@ export class AdministrativeAction {
 
   @Column({ type: 'jsonb' })
   snapshot: {
-    // studentId -> previousRoomId
-    [studentId: string]: number | null;
+    [studentId: string]: {
+      roomId: number | null;
+      applicationStatus: string;
+    };
   };
 
   @Column({ default: false })

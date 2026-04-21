@@ -663,6 +663,29 @@ export class AdminService {
 
       await resetQuery.execute();
 
+      // Step E.2: Delete Groups for the targeted cohort
+      // We disband any group that has members from the years we just processed
+      const cohortStudentEntities = await manager.find(Student, {
+        where: run.targetYears && run.targetYears.length > 0 
+          ? { year: In(run.targetYears) } 
+          : {}
+      });
+      const cohortStudentIds = cohortStudentEntities.map(s => s.userId);
+
+      if (cohortStudentIds.length > 0) {
+        const memberships = await manager.find(GroupMembership, {
+          where: { userId: In(cohortStudentIds) },
+          select: ['groupId'],
+        });
+        
+        const groupIdsToDelete = [...new Set(memberships.map(m => m.groupId))];
+        
+        if (groupIdsToDelete.length > 0) {
+          await manager.delete(Group, groupIdsToDelete);
+          console.log(`[PublishCommit] Disbanded ${groupIdsToDelete.length} groups for target years: ${run.targetYears?.join(', ')}`);
+        }
+      }
+
       // Capture Pre-Commit Snapshot for Undo
       const studentEntitiesInCohort = await manager.find(Student, {
         where: run.targetYears && run.targetYears.length > 0 
@@ -670,9 +693,12 @@ export class AdminService {
           : {}
       });
       
-      const snapshot: Record<string, number | null> = {};
+      const snapshot: Record<string, { roomId: number | null; applicationStatus: string }> = {};
       for (const s of studentEntitiesInCohort) {
-        snapshot[s.userId] = s.currentRoomId;
+        snapshot[s.userId] = {
+          roomId: s.currentRoomId,
+          applicationStatus: s.applicationStatus,
+        };
       }
 
       // Step F: Log the action
@@ -709,6 +735,9 @@ export class AdminService {
         where: studentIds.map((sid) => ({ studentId: sid, roomId: Not(IsNull()) })),
       });
 
+      console.log(`[BulkEvict] Processing ${rollNumbers.length} roll numbers:`, rollNumbers);
+      console.log(`[BulkEvict] Found ${students.length} students in DB.`);
+
       const summary: any[] = [];
       const roomIdsToFree: number[] = [];
 
@@ -720,8 +749,17 @@ export class AdminService {
             fullName: student.fullName,
             roomNumber: result.roomNumber,
             hostelName: result.hostelName,
+            status: 'room_freed',
           });
           roomIdsToFree.push(result.roomId);
+        } else {
+          summary.push({
+            rollNumber: student.rollNumber,
+            fullName: student.fullName,
+            roomNumber: 'None',
+            hostelName: 'N/A',
+            status: 'status_reset',
+          });
         }
       }
 
@@ -738,8 +776,10 @@ export class AdminService {
         await manager.delete(AllocationResult, {
           id: In(results.map((r) => r.id)),
         });
+      }
 
-        // Step C: Clear student room profiles
+      // Step C: Clear student room profiles (ALWAYS do this for students we found)
+      if (studentIds.length > 0) {
         await manager.update(
           Student,
           { userId: In(studentIds) },
@@ -747,15 +787,18 @@ export class AdminService {
             currentRoomId: null,
             allocatedRoomId: null,
             hasSubmitted: false,
-            applicationStatus: 'NONE',
+            applicationStatus: 'EVICTED',
           },
         );
       }
 
       // Step D: Log the action for Undo
-      const snapshot: Record<string, number | null> = {};
+      const snapshot: Record<string, { roomId: number | null; applicationStatus: string }> = {};
       for (const s of students) {
-        snapshot[s.userId] = s.currentRoomId;
+        snapshot[s.userId] = {
+          roomId: s.currentRoomId,
+          applicationStatus: s.applicationStatus,
+        };
       }
 
       const actionLog = this.actionRepository.create({
@@ -805,7 +848,7 @@ export class AdminService {
       if (!action) throw new NotFoundException('Action log not found');
       if (action.isReverted) throw new BadRequestException('Action already reverted');
 
-      const snapshot = action.snapshot;
+      const snapshot = action.snapshot as Record<string, { roomId: number | null; applicationStatus: string }>;
       const studentIds = Object.keys(snapshot);
 
       // 1. Identify all rooms that will be involved
@@ -817,24 +860,28 @@ export class AdminService {
       
       // Previous rooms (to be re-occupied)
       const roomsToOccupy = Object.values(snapshot)
+        .map(v => v.roomId)
         .filter(id => id !== null) as number[];
 
       // 2. Restore students
       for (const studentId of studentIds) {
-        const previousRoomId = snapshot[studentId];
+        const previousState = snapshot[studentId];
         await manager.update(Student, { userId: studentId }, {
-          currentRoomId: previousRoomId,
-          allocatedRoomId: previousRoomId,
-          hasSubmitted: action.actionType === ActionType.EVICTION, // Restore application if rolling back eviction
+          currentRoomId: previousState.roomId,
+          allocatedRoomId: previousState.roomId,
+          applicationStatus: previousState.applicationStatus,
+          // If we rollback eviction, they should be back to "Submitted" (true)
+          // If we rollback allocation, they should be back to "Submitted" (true) as they were in the pool
+          hasSubmitted: true, 
         });
       }
 
       // 3. Reset room statuses
       if (roomsToVacate.length > 0) {
-        await manager.update(Room, roomsToVacate, { status: RoomStatus.AVAILABLE });
+        await manager.update(Room, { id: In(roomsToVacate) }, { status: RoomStatus.AVAILABLE });
       }
       if (roomsToOccupy.length > 0) {
-        await manager.update(Room, roomsToOccupy, { status: RoomStatus.OCCUPIED });
+        await manager.update(Room, { id: In(roomsToOccupy) }, { status: RoomStatus.OCCUPIED });
       }
 
       // 4. Mark action as reverted

@@ -504,16 +504,30 @@ export default function AdminPage() {
       const text = event.target?.result as string;
       if (!text) return;
 
-      // Parse CSV: split by newlines, then by commas, take first column, filter out header/empty
+      // Parse CSV: split by newlines, then by common separators, take first column, filter out header/empty
       const lines = text.split(/\r?\n/);
       const rollNumbers = lines
         .map(line => {
-          const firstCol = line.split(',')[0];
+          // Support multiple separators: comma, pipe, tab, semicolon
+          const separators = [',', '|', '\t', ';'];
+          let firstCol = line;
+          
+          for (const sep of separators) {
+            if (line.includes(sep)) {
+              firstCol = line.split(sep)[0];
+              break;
+            }
+          }
+          
           return firstCol ? firstCol.replace(/['"]+/g, '').trim() : '';
         })
-        .filter(rn => rn && rn.toLowerCase() !== 'roll number' && rn.toLowerCase() !== 'rollnumber');
+        .filter(rn => {
+          if (!rn) return false;
+          const lower = rn.toLowerCase();
+          return lower !== 'roll number' && lower !== 'rollnumber' && lower !== 'roll_number';
+        });
       
-      setParsedRollNumbers(rollNumbers);
+      setParsedRollNumbers([...new Set(rollNumbers)]); // Use Set to avoid duplicates
       setEvictionSummary(null); // Clear previous summary when new file loaded
     };
     reader.readAsText(file);
@@ -1433,6 +1447,9 @@ export default function AdminPage() {
                             Gender
                           </th>
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700">
                             Actions
                           </th>
                         </tr>
@@ -1552,6 +1569,19 @@ export default function AdminPage() {
                                             }`}
                                           >
                                             {student.gender}
+                                          </span>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          <span
+                                            className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                              student.applicationStatus === "EVICTED"
+                                                ? "bg-red-100 text-red-700 border border-red-200"
+                                                : student.hasSubmitted
+                                                ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                                                : "bg-slate-100 text-slate-600 border border-slate-200"
+                                            }`}
+                                          >
+                                            {student.applicationStatus === "EVICTED" ? "Evicted" : student.hasSubmitted ? "Applied" : "Not Applied"}
                                           </span>
                                         </td>
                                 <td className="px-4 py-3">
@@ -2089,7 +2119,8 @@ export default function AdminPage() {
                             <tr>
                               <th className="px-4 py-2 text-left font-bold">Roll Number</th>
                               <th className="px-4 py-2 text-left font-bold">Name</th>
-                              <th className="px-4 py-2 text-left font-bold">Freed Room</th>
+                              <th className="px-4 py-2 text-left font-bold">Status</th>
+                              <th className="px-4 py-2 text-left font-bold">Action</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y">
@@ -2098,8 +2129,17 @@ export default function AdminPage() {
                                 <td className="px-4 py-2 font-mono text-xs">{s.rollNumber}</td>
                                 <td className="px-4 py-2 font-medium">{s.fullName}</td>
                                 <td className="px-4 py-2">
-                                  <span className="text-xs font-bold px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-100">
-                                    {s.hostelName} - {s.roomNumber}
+                                  <span className="text-xs font-mono bg-slate-100 px-1.5 py-0.5 rounded">
+                                    {s.roomNumber === 'None' ? 'Unallocated' : `${s.hostelName} - ${s.roomNumber}`}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                                    s.status === 'room_freed' 
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                      : 'bg-blue-50 text-blue-700 border-blue-200'
+                                  }`}>
+                                    {s.status === 'room_freed' ? 'Room Freed' : 'Profile Reset'}
                                   </span>
                                 </td>
                               </tr>

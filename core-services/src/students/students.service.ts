@@ -15,7 +15,7 @@ export class StudentsService {
 
   async findAll() {
     return this.studentRepository.find({
-      relations: ['user'],
+      relations: ['user', 'currentRoom', 'currentRoom.hostel', 'allocatedRoom', 'allocatedRoom.hostel'],
     });
   }
 
