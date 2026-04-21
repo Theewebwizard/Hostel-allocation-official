@@ -138,7 +138,7 @@ export default function Home() {
           <Link to="/register">
             <Button
               size="lg"
-              className="bg-white text-indigo-600 hover:bg-gray-100"
+              className="text-white bg-indigo-600 cursor-pointer"   
             >
               Register Now
             </Button>
