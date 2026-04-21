@@ -128,41 +128,41 @@ def setup_hostels():
     if h1:
         hostel_ids['BH1'] = h1
         # Floors G, 1, 2: Only E (Triple)
-        create_rooms_with_capacity(h1, 'E', [0, 1, 2], 5, 3, "triple")
+        create_rooms_with_capacity(h1, 'E', [0, 1, 2], 10, 3, "triple")
         # Floor 3: All wings
-        create_rooms_with_capacity(h1, 'A', [3], 5, 1, "single")
-        create_rooms_with_capacity(h1, 'B', [3], 5, 1, "single")
-        create_rooms_with_capacity(h1, 'C', [3], 5, 3, "triple")
-        create_rooms_with_capacity(h1, 'D', [3], 5, 3, "triple")
-        create_rooms_with_capacity(h1, 'E', [3], 5, 3, "triple")
+        create_rooms_with_capacity(h1, 'A', [3], 10, 1, "single")
+        create_rooms_with_capacity(h1, 'B', [3], 10, 1, "single")
+        create_rooms_with_capacity(h1, 'C', [3], 10, 3, "triple")
+        create_rooms_with_capacity(h1, 'D', [3], 10, 3, "triple")
+        create_rooms_with_capacity(h1, 'E', [3], 10, 3, "triple")
         
     # BH2: G,1,2 floors (3 floors). A,B (Single), C,D (Double).
     h2 = create_hostel("BH2", "male")
     if h2:
         hostel_ids['BH2'] = h2
-        create_rooms_with_capacity(h2, 'A', 3, 5, 1, "single")
-        create_rooms_with_capacity(h2, 'B', 3, 5, 1, "single")
-        create_rooms_with_capacity(h2, 'C', 3, 5, 2, "double")
-        create_rooms_with_capacity(h2, 'D', 3, 5, 2, "double")
+        create_rooms_with_capacity(h2, 'A', 3, 10, 1, "single")
+        create_rooms_with_capacity(h2, 'B', 3, 10, 1, "single")
+        create_rooms_with_capacity(h2, 'C', 3, 10, 2, "double")
+        create_rooms_with_capacity(h2, 'D', 3, 10, 2, "double")
         
     # BH3: 8 floors (G-7). Double seater completely.
     h3 = create_hostel("BH3", "male")
     if h3:
         hostel_ids['BH3'] = h3
-        create_rooms_with_capacity(h3, 'A', 8, 5, 2, "double")
-        create_rooms_with_capacity(h3, 'B', 8, 5, 2, "double")
+        create_rooms_with_capacity(h3, 'A', 8, 10, 2, "double")
+        create_rooms_with_capacity(h3, 'B', 8, 10, 2, "double")
         
     # BH4: 7 floors (G-6). 2nd year only.
     h4 = create_hostel("BH4", "male")
     if h4:
         hostel_ids['BH4'] = h4
-        create_rooms_with_capacity(h4, 'A', 7, 5, 2, "double")
-        create_rooms_with_capacity(h4, 'B', 7, 5, 2, "double")
+        create_rooms_with_capacity(h4, 'A', 7, 10, 2, "double")
+        create_rooms_with_capacity(h4, 'B', 7, 10, 2, "double")
         
     g1 = create_hostel("GH1", "female")
     if g1:
         hostel_ids['GH1'] = g1
-        create_rooms_with_capacity(g1, 'A', 2, 5, 2, "double")
+        create_rooms_with_capacity(g1, 'A', 2, 10, 2, "double")
         
     return hostel_ids
 
