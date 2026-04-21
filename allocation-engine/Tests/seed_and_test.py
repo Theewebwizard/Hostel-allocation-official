@@ -66,15 +66,20 @@ def clear_database():
         
         # Truncate tables with RESTART IDENTITY to reset IDs to 1
         tables_to_truncate = [
+            "administrative_actions",
             "allocation_results",
             "allocation_decisions",
             "allocation_runs", 
+            "allocation_rules",
             "roommate_invitations",
+            "swap_requests",
+            "swap_history",
             "group_memberships",
             "groups",
             "rooms",
             "hostels",
-            "students"
+            "students",
+            "wing_participation_settings"
         ]
         
         for table in tables_to_truncate:
@@ -141,32 +146,47 @@ def setup_hostels():
     return hostel_ids
 
 def create_allocation_rules():
-    print("\n📋 Creating Allocation Rules...")
+    print("\n📋 Configuring Rules Matrix (Hierarchical)...")
     hostels = session.get(f"{NEST_API}/admin/hostels").json()
     hm = {h['name']: h['id'] for h in hostels}
-    rules = [
-        {"hostelId": hm.get('BH1'), "wing": "A", "year": 1, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH1'), "wing": "B", "year": 1, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH1'), "wing": "E", "year": 4, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "C", "year": 1, "isAllowed": True, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "C", "year": 2, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "C", "year": 3, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "C", "year": 4, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "D", "year": 4, "isAllowed": True, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "D", "year": 1, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "D", "year": 2, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH2'), "wing": "D", "year": 3, "isAllowed": False, "priority": 15},
-        {"hostelId": hm.get('BH3'), "year": 3, "isAllowed": True, "priority": 10},
-        {"hostelId": hm.get('BH3'), "year": 1, "isAllowed": False, "priority": 10},
-        {"hostelId": hm.get('BH3'), "year": 2, "isAllowed": False, "priority": 10},
-        {"hostelId": hm.get('BH3'), "year": 4, "isAllowed": False, "priority": 10},
-        {"hostelId": hm.get('BH4'), "year": 2, "isAllowed": True, "priority": 10},
-        {"hostelId": hm.get('BH4'), "year": 1, "isAllowed": False, "priority": 10},
-        {"hostelId": hm.get('BH4'), "year": 3, "isAllowed": False, "priority": 10},
-        {"hostelId": hm.get('BH4'), "year": 4, "isAllowed": False, "priority": 10},
-    ]
-    for r in rules: session.post(f"{NEST_API}/admin/rules", json=r)
-    print("✅ Allocation rules configured.")
+    
+    # Hierarchical Matrix Setup
+    # - BH1: Year 4 by default, but Wing E is for Year 1
+    # - BH2: Wing C for Year 1, Wing D for Year 4
+    # - BH3: Year 3 only
+    # - BH4: Year 2 only
+    # - GH1: All years allowed
+    matrix = {
+        str(hm.get('BH1')): {
+            "years": {4: True},
+            "wings": {"E": {1: True}}
+        },
+        str(hm.get('BH2')): {
+            "years": {},
+            "wings": {
+                "C": {1: True},
+                "D": {4: True}
+            }
+        },
+        str(hm.get('BH3')): {
+            "years": {3: True},
+            "wings": {}
+        },
+        str(hm.get('BH4')): {
+            "years": {2: True},
+            "wings": {}
+        },
+        str(hm.get('GH1')): {
+            "years": {1: True, 2: True, 3: True, 4: True},
+            "wings": {}
+        }
+    }
+    
+    res = session.post(f"{NEST_API}/admin/rules/matrix", json=matrix)
+    if res.status_code in [200, 201]:
+        print(f"✅ Rules matrix configured: {res.json().get('count')} rules generated.")
+    else:
+        print(f"⚠️ Failed to configure rules matrix: {res.text}")
 
 def generate_students_and_groups(mode="group_based"):
     print(f"\n🎓 Generating Students & Groups (Exactly 240) for mode: {mode}...")
