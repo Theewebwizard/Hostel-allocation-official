@@ -919,18 +919,17 @@ export class AdminService {
         // Hostel-wide rules
         for (const yearStr of Object.keys(config.years)) {
           const year = parseInt(yearStr);
-          if (config.years[year]) {
-            newRules.push(
-              manager.create(AllocationRule, {
-                hostelId,
-                year,
-                isAllowed: true,
-                priority: 10,
-                description: `Auto: Year ${year} in Hostel ID ${hostelId}`,
-                wing: null,
-              }),
-            );
-          }
+          // Always save the rule (whether allowed or blocked) to ensure strict enforcement
+          newRules.push(
+            manager.create(AllocationRule, {
+              hostelId,
+              year,
+              isAllowed: config.years[year],
+              priority: 10,
+              description: `Auto: Year ${year} in Hostel ID ${hostelId}`,
+              wing: null,
+            }),
+          );
         }
 
         // Wing-specific rules
@@ -938,18 +937,17 @@ export class AdminService {
           const yearMap = config.wings[wingName];
           for (const yearStr of Object.keys(yearMap)) {
             const year = parseInt(yearStr);
-            if (yearMap[year]) {
-              newRules.push(
-                manager.create(AllocationRule, {
-                  hostelId,
-                  year,
-                  isAllowed: true,
-                  priority: 10,
-                  description: `Auto: Year ${year} in Wing ${wingName} (Hostel ID ${hostelId})`,
-                  wing: wingName,
-                }),
-              );
-            }
+            // Always save wing-specific rules to override hostel-wide defaults
+            newRules.push(
+              manager.create(AllocationRule, {
+                hostelId,
+                year,
+                isAllowed: yearMap[year],
+                priority: 15, // Wing-specific rules have higher priority
+                description: `Auto: Year ${year} in Wing ${wingName} (Hostel ID ${hostelId})`,
+                wing: wingName,
+              }),
+            );
           }
         }
       }

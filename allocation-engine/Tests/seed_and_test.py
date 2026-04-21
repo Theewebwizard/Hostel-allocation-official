@@ -146,49 +146,74 @@ def setup_hostels():
     return hostel_ids
 
 def create_allocation_rules():
-    print("\n📋 Configuring Rules Matrix (Hierarchical)...")
-    hostels = session.get(f"{NEST_API}/admin/hostels").json()
-    hm = {h['name']: h['id'] for h in hostels}
+    print("\n📋 Configuring Rules Matrix (Hierarchical & Synchronized)...")
     
-    # Verify all hostels exist
-    required_hostels = ['BH1', 'BH2', 'BH3', 'BH4', 'GH1']
-    missing = [h for h in required_hostels if h not in hm]
-    if missing:
-        print(f"⚠️ Warning: Missing hostels in DB: {missing}")
+    # 1. Fetch the initialized matrix from backend
+    # This ensures we have all hostels and wings currently in the DB
+    res = session.get(f"{NEST_API}/admin/rules/matrix")
+    if res.status_code != 200:
+        print(f"⚠️ Failed to fetch initial rules matrix: {res.text}")
         return
-
-    # Hierarchical Matrix Setup
-    matrix = {
-        str(hm['BH1']): {
-            "years": {4: True},
-            "wings": {"E": {1: True}}
-        },
-        str(hm['BH2']): {
-            "years": {},
-            "wings": {
-                "C": {1: True},
-                "D": {4: True}
-            }
-        },
-        str(hm['BH3']): {
-            "years": {3: True},
-            "wings": {}
-        },
-        str(hm['BH4']): {
-            "years": {2: True},
-            "wings": {}
-        },
-        str(hm['GH1']): {
-            "years": {1: True, 2: True, 3: True, 4: True},
-            "wings": {}
-        }
-    }
     
+    matrix = res.json()
+    hostels = session.get(f"{NEST_API}/admin/hostels").json()
+    hm = {h['name']: str(h['id']) for h in hostels}
+
+    def set_rule(hostel_id, year, is_allowed, wing=None):
+        """Helper to set rules with UI-like synchronization"""
+        if hostel_id not in matrix:
+            return
+            
+        if wing is None:
+            # Hostel-wide toggle: Sync all wings
+            matrix[hostel_id]["years"][str(year)] = is_allowed
+            for w in matrix[hostel_id]["wings"]:
+                matrix[hostel_id]["wings"][w][str(year)] = is_allowed
+        else:
+            # Wing-specific toggle: Partial logic
+            if wing in matrix[hostel_id]["wings"]:
+                matrix[hostel_id]["wings"][wing][str(year)] = is_allowed
+                
+                # If we manually set a wing to false, the hostel-wide rule for that year 
+                # should also be false (to show as 'partial' or 'off')
+                if not is_allowed:
+                    matrix[hostel_id]["years"][str(year)] = False
+                else:
+                    # If all wings are now true, hostel-wide becomes true
+                    all_true = all(w_map.get(str(year), False) for w_map in matrix[hostel_id]["wings"].values())
+                    matrix[hostel_id]["years"][str(year)] = all_true
+
+    # 2. Configure the specific rules for the test scenario
+    
+    # BH1: Year 4 allowed everywhere. Year 1 allowed ONLY in Wing E.
+    if 'BH1' in hm:
+        set_rule(hm['BH1'], 4, True) # Syncs all wings to Y4: True
+        set_rule(hm['BH1'], 1, True, wing="E") # Partial rule (Y1: True only for E)
+
+    # BH2: Year 1 allowed ONLY in Wing C. Year 4 allowed ONLY in Wing D.
+    if 'BH2' in hm:
+        set_rule(hm['BH2'], 1, True, wing="C")
+        set_rule(hm['BH2'], 4, True, wing="D")
+
+    # BH3: Year 3 allowed everywhere
+    if 'BH3' in hm:
+        set_rule(hm['BH3'], 3, True)
+
+    # BH4: Year 2 allowed everywhere
+    if 'BH4' in hm:
+        set_rule(hm['BH4'], 2, True)
+
+    # GH1: All years allowed everywhere
+    if 'GH1' in hm:
+        for y in [1, 2, 3, 4]:
+            set_rule(hm['GH1'], y, True)
+    
+    # 3. Save the synchronized matrix
     res = session.post(f"{NEST_API}/admin/rules/matrix", json={"matrix": matrix})
     if res.status_code in [200, 201]:
-        print(f"✅ Rules matrix configured: {res.json().get('count')} rules generated.")
+        print(f"✅ Rules matrix synchronized and saved: {res.json().get('count')} rules generated.")
     else:
-        print(f"⚠️ Failed to configure rules matrix: {res.text}")
+        print(f"⚠️ Failed to save rules matrix: {res.text}")
 
 def generate_students_and_groups(mode="group_based"):
     print(f"\n🎓 Generating Students & Groups (Exactly 240) for mode: {mode}...")
