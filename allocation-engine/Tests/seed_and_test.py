@@ -108,41 +108,62 @@ def create_hostel(name, gender):
     return None
 
 def create_rooms_with_capacity(hostel_id, wing, floors, rooms_per_floor, capacity, room_type):
-    rooms = [{"hostelId": hostel_id, "roomNumber": f"{wing}-{floor}{r:02d}", "floor": floor, "wing": wing, "capacity": capacity, "roomType": room_type} for floor in range(1, floors + 1) for r in range(1, rooms_per_floor + 1)]
+    # floors can be an int (range(0, floors)) or a list of specific floor numbers
+    if isinstance(floors, int):
+        floor_range = range(0, floors) # G=0, 1, 2...
+    else:
+        floor_range = floors
+        
+    rooms = [{"hostelId": hostel_id, "roomNumber": f"{wing}-{floor}{r:02d}", "floor": floor, "wing": wing, "capacity": capacity, "roomType": room_type} for floor in floor_range for r in range(1, rooms_per_floor + 1)]
     for room in rooms:
         session.post(f"{NEST_API}/admin/rooms", json=room)
-    print(f"   🏢 Created {len(rooms)} {room_type} rooms in Wing {wing}.")
+    print(f"   🏢 Created {len(rooms)} {room_type} rooms in Wing {wing} (Floors {list(floor_range)}).")
 
 def setup_hostels():
     print("\n🏗️ Building Hostels and Rooms...")
     hostel_ids = {}
+    
+    # BH1: G,1,2,3 floors. Only E wing at G,1,2. All wings at 3.
     h1 = create_hostel("BH1", "male")
     if h1:
         hostel_ids['BH1'] = h1
-        create_rooms_with_capacity(h1, 'A', 2, 5, 1, "single")
-        create_rooms_with_capacity(h1, 'B', 2, 5, 1, "single")
-        create_rooms_with_capacity(h1, 'C', 2, 5, 2, "double")
-        create_rooms_with_capacity(h1, 'D', 2, 5, 2, "double")
-        create_rooms_with_capacity(h1, 'E', 2, 5, 3, "triple")
+        # Floors G, 1, 2: Only E (Triple)
+        create_rooms_with_capacity(h1, 'E', [0, 1, 2], 5, 3, "triple")
+        # Floor 3: All wings
+        create_rooms_with_capacity(h1, 'A', [3], 5, 1, "single")
+        create_rooms_with_capacity(h1, 'B', [3], 5, 1, "single")
+        create_rooms_with_capacity(h1, 'C', [3], 5, 3, "triple")
+        create_rooms_with_capacity(h1, 'D', [3], 5, 3, "triple")
+        create_rooms_with_capacity(h1, 'E', [3], 5, 3, "triple")
+        
+    # BH2: G,1,2 floors (3 floors). A,B (Single), C,D (Double).
     h2 = create_hostel("BH2", "male")
     if h2:
         hostel_ids['BH2'] = h2
-        create_rooms_with_capacity(h2, 'C', 2, 5, 3, "triple")
-        create_rooms_with_capacity(h2, 'D', 2, 5, 2, "double")
+        create_rooms_with_capacity(h2, 'A', 3, 5, 1, "single")
+        create_rooms_with_capacity(h2, 'B', 3, 5, 1, "single")
+        create_rooms_with_capacity(h2, 'C', 3, 5, 2, "double")
+        create_rooms_with_capacity(h2, 'D', 3, 5, 2, "double")
+        
+    # BH3: 8 floors (G-7). Double seater completely.
     h3 = create_hostel("BH3", "male")
     if h3:
         hostel_ids['BH3'] = h3
-        create_rooms_with_capacity(h3, 'A', 2, 5, 2, "double")
-        create_rooms_with_capacity(h3, 'B', 2, 5, 2, "double")
+        create_rooms_with_capacity(h3, 'A', 8, 5, 2, "double")
+        create_rooms_with_capacity(h3, 'B', 8, 5, 2, "double")
+        
+    # BH4: 7 floors (G-6). 2nd year only.
     h4 = create_hostel("BH4", "male")
     if h4:
         hostel_ids['BH4'] = h4
-        create_rooms_with_capacity(h4, 'A', 2, 5, 2, "double")
-        create_rooms_with_capacity(h4, 'B', 2, 5, 2, "double")
+        create_rooms_with_capacity(h4, 'A', 7, 5, 2, "double")
+        create_rooms_with_capacity(h4, 'B', 7, 5, 2, "double")
+        
     g1 = create_hostel("GH1", "female")
     if g1:
         hostel_ids['GH1'] = g1
         create_rooms_with_capacity(g1, 'A', 2, 5, 2, "double")
+        
     return hostel_ids
 
 def create_allocation_rules():
@@ -158,6 +179,14 @@ def create_allocation_rules():
     matrix = res.json()
     hostels = session.get(f"{NEST_API}/admin/hostels").json()
     hm = {h['name']: str(h['id']) for h in hostels}
+
+    # 1.5 Initialize all years 1-4 to False for all hostels/wings
+    # This ensures anything not explicitly allowed is BLOCKED (strict enforcement)
+    for h_id in matrix:
+        for y in [1, 2, 3, 4]:
+            matrix[h_id]["years"][str(y)] = False
+            for w in matrix[h_id]["wings"]:
+                matrix[h_id]["wings"][w][str(y)] = False
 
     def set_rule(hostel_id, year, is_allowed, wing=None):
         """Helper to set rules with UI-like synchronization"""
@@ -185,25 +214,34 @@ def create_allocation_rules():
 
     # 2. Configure the specific rules for the test scenario
     
-    # BH1: Year 4 allowed everywhere. Year 1 allowed ONLY in Wing E.
+    # BH1: Year 4 (Wings A, B). Year 1 (Wings C, D, E).
     if 'BH1' in hm:
-        set_rule(hm['BH1'], 4, True) # Syncs all wings to Y4: True
-        set_rule(hm['BH1'], 1, True, wing="E") # Partial rule (Y1: True only for E)
+        # 4th Year rules for A, B
+        set_rule(hm['BH1'], 4, True, wing="A")
+        set_rule(hm['BH1'], 4, True, wing="B")
+        # 1st Year rules for C, D, E
+        set_rule(hm['BH1'], 1, True, wing="C")
+        set_rule(hm['BH1'], 1, True, wing="D")
+        set_rule(hm['BH1'], 1, True, wing="E")
 
-    # BH2: Year 1 allowed ONLY in Wing C. Year 4 allowed ONLY in Wing D.
+    # BH2: Year 4 (Wings A, B). Year 3 (Wings C, D).
     if 'BH2' in hm:
-        set_rule(hm['BH2'], 1, True, wing="C")
-        set_rule(hm['BH2'], 4, True, wing="D")
+        set_rule(hm['BH2'], 4, True, wing="A")
+        set_rule(hm['BH2'], 4, True, wing="B")
+        set_rule(hm['BH2'], 3, True, wing="C")
+        set_rule(hm['BH2'], 3, True, wing="D")
 
-    # BH3: Year 3 allowed everywhere
+    # BH3: General/Shared (Double seater completely)
+    # I'll make it available for all years so it can take overflow
     if 'BH3' in hm:
-        set_rule(hm['BH3'], 3, True)
+        for y in [1, 2, 3, 4]:
+            set_rule(hm['BH3'], y, True)
 
     # BH4: Year 2 allowed everywhere
     if 'BH4' in hm:
         set_rule(hm['BH4'], 2, True)
 
-    # GH1: All years allowed everywhere
+    # GH1: All years allowed everywhere (Female)
     if 'GH1' in hm:
         for y in [1, 2, 3, 4]:
             set_rule(hm['GH1'], y, True)
@@ -218,17 +256,20 @@ def create_allocation_rules():
 def generate_students_and_groups(mode="group_based"):
     print(f"\n🎓 Generating Students & Groups (Exactly 240) for mode: {mode}...")
     GROUP_CONFIGS = [
-        {"year": 1, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 2}, 
-        {"year": 2, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 2}, 
-        {"year": 3, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 3}, 
-        {"year": 4, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 3}, 
-        {"year": 1, "gender": "male", "sizes": [3], "distribution": [1.0], "count": 10}, 
-        {"year": 1, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 25}, 
-        {"year": 1, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 20}, 
-        {"year": 2, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 20}, 
-        {"year": 3, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 20}, 
-        {"year": 4, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 20}, 
-        {"year": 4, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 10}
+        # Year 1 (BH1 C,D,E): 90 students
+        {"year": 1, "gender": "male", "sizes": [1, 2, 3], "distribution": [0.2, 0.4, 0.4], "count": 40}, # ~90 students total if sizes average ~2.25
+        # Year 2 (BH4): 140 students
+        {"year": 2, "gender": "male", "sizes": [1, 2], "distribution": [0.3, 0.7], "count": 80}, # ~140 students
+        # Year 3 (BH2 C,D): 60 students
+        {"year": 3, "gender": "male", "sizes": [1, 2], "distribution": [0.3, 0.7], "count": 35}, # ~60 students
+        # Year 4 (BH1 A,B + BH2 A,B): 10 + 30 = 40 students
+        {"year": 4, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 40},
+        # BH3 Shared (160 beds): Let's add 160 more students across years
+        {"year": 1, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 40}, # 80 students
+        {"year": 3, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 40}, # 80 students
+        # Female Students (GH1): 20 beds
+        {"year": 1, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 5}, # 10
+        {"year": 4, "gender": "female", "sizes": [2], "distribution": [1.0], "count": 5}, # 10
     ]
 
     uid = str(uuid.uuid4())[:4]
