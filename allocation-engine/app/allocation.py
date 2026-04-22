@@ -6,6 +6,13 @@ Stage 1: Constraint Satisfaction Problem (CSP)
 
 Stage 2: Bin Packing with First-Fit Decreasing (FFD)
 - Optimizes group placement to maximize cohesion
+
+IMPORTANT NOTE: Roommate pairs (accepted invitations) are considered ATOMIC. 
+They must ALWAYS be placed in the same room. If a room with sufficient capacity 
+is not available, the pair must not be allocated to that wing/hostel rather 
+than being split. To satisfy the requirement that all students are allocated 
+while respecting this, the engine uses Consolidation Packing (filling holes 
+first) and Unit-Size Prioritization (pairs first).
 """
 
 from typing import List, Dict, Set, Tuple, Optional
@@ -281,6 +288,31 @@ class AllocationEngine:
         """Sort groups by size (descending) for FFD algorithm"""
         return sorted(self.groups, key=lambda g: len(g.members), reverse=True)
     
+    def _get_atomic_units(self, students: List[Student]) -> List[List[Student]]:
+        """Group students into atomic units: roommate pairs or individuals.
+        A roommate pair is only formed if BOTH members are in the provided list.
+        """
+        units = []
+        processed = set()
+        student_map = {s.user_id: s for s in students}
+        
+        for s in students:
+            if s.user_id in processed:
+                continue
+            
+            rm_id = self.roommate_map.get(s.user_id)
+            if rm_id and rm_id in student_map:
+                # Both members are here, form an atomic pair
+                units.append([s, student_map[rm_id]])
+                processed.add(s.user_id)
+                processed.add(rm_id)
+            else:
+                # No roommate or roommate not in this list, form a single unit
+                units.append([s])
+                processed.add(s.user_id)
+                
+        return units
+    
     def _find_best_wing_for_group(
         self,
         group_members: List[Student],
@@ -315,30 +347,41 @@ class AllocationEngine:
 
         # Determine group year (assuming all members are same year)
         group_year = group_members[0].year if group_members else None
+        
+        # Determine the largest atomic unit size in this group
+        units = self._get_atomic_units(group_members)
+        max_unit_size = max([len(u) for u in units]) if units else 1
 
         def wing_sort_key(wing_k):
             wing = self.wings[wing_k]
             cap = state.wing_capacities[wing_k]
             
+            # Check if this wing has ANY rooms that can fit our largest unit
+            # This prevents sending a roommate pair to a hostel with only single rooms
+            can_fit_units = any(r.capacity >= max_unit_size for r in wing.rooms)
+            fit_penalty = 0 if can_fit_units else 1
+            
             # Dynamically calculate priority from the rules engine
             rule_priority = 0
             if group_year is not None:
                 for rule in self.rules:
-                    # Look for ALLOWING rules that match this specific hostel, wing, and year
                     if rule.is_allowed and \
                        (rule.hostel_id is None or rule.hostel_id == wing.hostel_id) and \
                        (rule.wing is None or rule.wing == wing.wing_name) and \
                        (rule.year is None or rule.year == group_year):
-                        
-                        # Capture the highest priority among applicable rules
                         if rule.priority > rule_priority:
                             rule_priority = rule.priority
             
-            # Sort by rule priority (highest first), then by capacity (highest first)
-            # We use negative values because Python's sort() is ascending by default
-            return (-rule_priority, -cap, wing_k)
+            # Sort by fit_penalty (compatible rooms first), then rule priority, then capacity
+            return (fit_penalty, -rule_priority, -cap, wing_k)
 
         available_wings.sort(key=wing_sort_key)
+        
+        # Verify the top choice actually has compatible rooms
+        top_wing = self.wings[available_wings[0]]
+        if not any(r.capacity >= max_unit_size for r in top_wing.rooms):
+            return None
+            
         return available_wings[0]
     
     def _allocate_group_to_wing(
@@ -349,110 +392,85 @@ class AllocationEngine:
         group_id: Optional[int] = None,
         target_wing_for_happiness: Optional[str] = None
     ) -> List[AllocationResult]:
-        """Allocate all members of a group to rooms in a wing"""
+        """Allocate all members of a group to rooms in a wing, respecting atomic units"""
         results = []
         wing = self.wings[wing_key]
 
-        # Get available rooms in this wing, sorted by priority and adjacency
+        # Get available rooms in this wing, sorted by:
+        # 1. Rule Priority (high first)
+        # 2. Occupancy (high first - Consolidation)
+        # 3. Floor/Room number
         def room_sort_key(r):
-            # First filter valid_rooms for this specific student to get priorities
-            # But wait, here we have multiple members. We'll use the priority from the wing-level check or just default to 0
-            # Since _find_best_wing_for_group already picked the best wing, we'll just use the priorities we tagged earlier if any
             prio = getattr(r, 'match_priority', 0)
-            
+            occ = len(state.room_assignments.get(r.id, []))
             try:
                 num = int(''.join(filter(str.isdigit, r.room_number)))
             except ValueError:
                 num = r.room_number
-            return (-prio, r.floor or 0, num)
+            return (-prio, -occ, r.floor or 0, num)
 
         available_rooms = sorted(
             [r for r in wing.rooms if len(state.room_assignments.get(r.id, [])) < r.capacity],
             key=room_sort_key
         )
 
-        members_to_allocate = list(group_members)
-        
-        # Pre-process roommate pairs to keep them together
-        roommate_pairs = []
-        member_ids = {m.user_id for m in members_to_allocate}
-        processed = set()
-        
-        for m in members_to_allocate:
-            if m.user_id in processed:
-                continue
-            
-            rm_id = self.roommate_map.get(m.user_id)
-            if rm_id and rm_id in member_ids:
-                # We have a pair!
-                rm_member = next(x for x in members_to_allocate if x.user_id == rm_id)
-                roommate_pairs.append((m, rm_member))
-                processed.add(m.user_id)
-                processed.add(rm_id)
-        
-        lonely_members = [m for m in members_to_allocate if m.user_id not in processed]
+        # Get atomic units (pairs or singles) and sort by size (Pairs first)
+        units = sorted(self._get_atomic_units(group_members), key=len, reverse=True)
+        unallocated_units = list(units)
 
         for room in available_rooms:
+            if not unallocated_units:
+                break
+                
             current_occupancy = len(state.room_assignments.get(room.id, []))
             available_spots = room.capacity - current_occupancy
 
             if available_spots <= 0:
                 continue
 
-            # 1. Try to allocate roommate pairs first
-            while available_spots >= 2 and roommate_pairs:
-                pair = roommate_pairs.pop(0)
-                for member in pair:
-                    # Update state
-                    if room.id not in state.room_assignments:
-                        state.room_assignments[room.id] = []
-                    state.room_assignments[room.id].append(member.user_id)
-                    state.student_allocations[member.user_id] = room.id
-
-                    # Create result
-                    results.append(AllocationResult(
-                        student_id=member.user_id,
-                        room_id=room.id,
-                        hostel_name=wing.hostel_name,
-                        room_number=room.room_number,
-                        wing=room.wing,
-                        floor=room.floor,
-                        group_id=group_id,
-                        happiness=100  # Roommate pairs get 100 happiness
-                    ))
-                available_spots -= 2
-
-            # 2. Allocate lonely members to remaining spots
-            while available_spots >= 1 and lonely_members:
-                member = lonely_members.pop(0)
+            # Try to fit units into this room
+            # Priority: Try to fit pairs if possible, otherwise singles
+            i = 0
+            while i < len(unallocated_units) and available_spots > 0:
+                unit = unallocated_units[i]
+                unit_size = len(unit)
                 
-                # Update state
-                if room.id not in state.room_assignments:
-                    state.room_assignments[room.id] = []
-                state.room_assignments[room.id].append(member.user_id)
-                state.student_allocations[member.user_id] = room.id
+                if available_spots >= unit_size:
+                    # Allocate entire unit
+                    for member in unit:
+                        if room.id not in state.room_assignments:
+                            state.room_assignments[room.id] = []
+                        state.room_assignments[room.id].append(member.user_id)
+                        state.student_allocations[member.user_id] = room.id
 
-                # Happiness calculation
-                happiness = 100
-                if target_wing_for_happiness and wing_key != target_wing_for_happiness:
-                    happiness = self._proximity_score(wing_key, target_wing_for_happiness)
+                        # Happiness calculation
+                        happiness = 100
+                        if target_wing_for_happiness and wing_key != target_wing_for_happiness:
+                            happiness = self._proximity_score(wing_key, target_wing_for_happiness)
 
-                # Create result
-                results.append(AllocationResult(
-                    student_id=member.user_id,
-                    room_id=room.id,
-                    hostel_name=wing.hostel_name,
-                    room_number=room.room_number,
-                    wing=room.wing,
-                    floor=room.floor,
-                    group_id=group_id,
-                    happiness=happiness
-                ))
-                available_spots -= 1
+                        results.append(AllocationResult(
+                            student_id=member.user_id,
+                            room_id=room.id,
+                            hostel_name=wing.hostel_name,
+                            room_number=room.room_number,
+                            wing=room.wing,
+                            floor=room.floor,
+                            group_id=group_id,
+                            happiness=happiness
+                        ))
+                    
+                    available_spots -= unit_size
+                    unallocated_units.pop(i)
+                    # Don't increment i, as we popped
+                else:
+                    # Unit doesn't fit, try next unit (maybe a single fits where a pair didn't)
+                    i += 1
 
         # Update wing capacity
-        allocated_count = len(group_members) - len(roommate_pairs) * 2 - len(lonely_members)
+        allocated_count = len(group_members) - sum(len(u) for u in unallocated_units)
         state.wing_capacities[wing_key] -= allocated_count
+
+        return results
 
         return results
 
@@ -465,16 +483,20 @@ class AllocationEngine:
         """
         When no single wing fits the whole group, greedily fill wings ordered
         by proximity to the first wing used (keeps sub-groups close).
+        Respects atomic units (never splits a roommate pair across wings).
         """
         results = []
-        remaining = list(unallocated_members)
+        # Group into atomic units first so we don't split them across wings
+        remaining_units = self._get_atomic_units(unallocated_members)
         first_wing_used = None
 
-        while remaining:
+        while remaining_units:
+            # Flatten remaining units to check eligibility
+            flat_remaining = [s for u in remaining_units for s in u]
+            
             # Find best wing for the largest possible sub-group from remaining
             best_wing = None
-            best_eligible = []
-
+            
             # Sort wings by proximity to first wing (if any), then by capacity
             wing_priorities = []
             for wing_key, capacity in state.wing_capacities.items():
@@ -482,13 +504,13 @@ class AllocationEngine:
                     continue
 
                 eligible_here = [
-                    m for m in remaining
+                    m for m in flat_remaining
                     if wing_key in self._get_valid_wing_keys_for_student(m)
                 ]
 
                 if eligible_here:
                     proximity = self._proximity_score(wing_key, first_wing_used) if first_wing_used else 50
-                    wing_priorities.append((wing_key, len(eligible_here), proximity, eligible_here))
+                    wing_priorities.append((wing_key, len(eligible_here), proximity))
 
             # Sort by proximity (desc), then by eligible count (desc)
             wing_priorities.sort(key=lambda x: (-x[2], -x[1]))
@@ -496,61 +518,118 @@ class AllocationEngine:
             if not wing_priorities:
                 break  # no more valid wings
 
-            best_wing, _, _, eligible_for_wing = wing_priorities[0]
+            best_wing, _, _ = wing_priorities[0]
             wing_capacity = state.wing_capacities[best_wing]
-            batch = eligible_for_wing[:wing_capacity]
+            
+            # Take units that fit in this wing's remaining capacity
+            batch_members = []
+            current_batch_size = 0
+            units_to_remove = []
+            
+            for i, unit in enumerate(remaining_units):
+                unit_size = len(unit)
+                # Check if all members of unit are eligible for this wing
+                is_eligible = all(wing_key in self._get_valid_wing_keys_for_student(m) for m in unit)
+                
+                if is_eligible and current_batch_size + unit_size <= wing_capacity:
+                    batch_members.extend(unit)
+                    current_batch_size += unit_size
+                    units_to_remove.append(i)
+            
+            if not batch_members:
+                # No units fit in this wing's current capacity, but it has capacity > 0
+                # We must skip this wing for now to avoid an infinite loop or split a unit
+                # (This happens if wing capacity is 1 but we only have pairs left)
+                # We'll temporarily ignore this wing in this iteration by looking at the next best
+                if len(wing_priorities) > 1:
+                    best_wing, _, _ = wing_priorities[1] # Try next best wing
+                    # (Simplified: we'll just break and let individual phase handle it if it's truly stuck)
+                    break
+                else:
+                    break
 
             if first_wing_used is None:
                 first_wing_used = best_wing
 
             batch_results = self._allocate_group_to_wing(
-                batch, best_wing, state,
+                batch_members, best_wing, state,
                 group_id=group.id,
                 target_wing_for_happiness=first_wing_used
             )
             results.extend(batch_results)
 
-            allocated_ids = {r.student_id for r in batch_results}
-            remaining = [m for m in remaining if m.user_id not in allocated_ids]
+            # Remove processed units (in reverse order to preserve indices)
+            for i in sorted(units_to_remove, reverse=True):
+                remaining_units.pop(i)
 
         return results
     
-    def _allocate_individual(
+    def _allocate_individuals(
         self,
-        student: Student,
+        students: List[Student],
         state: AllocationState
-    ) -> Optional[AllocationResult]:
-        """Allocate a single student without a group"""
-        valid_rooms = self._get_valid_rooms_for_student(student)
+    ) -> List[AllocationResult]:
+        """Allocate multiple students, respecting atomic roommate units"""
+        results = []
+        units = sorted(self._get_atomic_units(students), key=len, reverse=True)
+        
+        for unit in units:
+            unit_size = len(unit)
+            # Find a room that can fit the entire unit
+            allocated = False
+            
+            # Use the first student's eligibility as a proxy for the unit (all members should match the same rules)
+            student = unit[0]
+            valid_rooms = self._get_valid_rooms_for_student(student)
 
-        # Sort: 1. Rule Priority (high first), 2. Occupancy (high first for consolidation)
-        valid_rooms.sort(
-            key=lambda r: (-getattr(r, 'match_priority', 0), -len(state.room_assignments.get(r.id, [])), r.id)
-        )
+            # Sort: 1. Rule Priority (high first), 2. Occupancy (high first for consolidation)
+            valid_rooms.sort(
+                key=lambda r: (-getattr(r, 'match_priority', 0), -len(state.room_assignments.get(r.id, [])), r.id)
+            )
 
-        for room in valid_rooms:
-            current_occupancy = len(state.room_assignments.get(room.id, []))
-            if current_occupancy < room.capacity:
-                # Allocate
-                if room.id not in state.room_assignments:
-                    state.room_assignments[room.id] = []
-                state.room_assignments[room.id].append(student.user_id)
-                state.student_allocations[student.user_id] = room.id
+            for room in valid_rooms:
+                current_occupancy = len(state.room_assignments.get(room.id, []))
+                if current_occupancy + unit_size <= room.capacity:
+                    # Allocate entire unit to this room
+                    for member in unit:
+                        if room.id not in state.room_assignments:
+                            state.room_assignments[room.id] = []
+                        state.room_assignments[room.id].append(member.user_id)
+                        state.student_allocations[member.user_id] = room.id
 
-                hostel = self.hostels.get(room.hostel_id)
+                        hostel = self.hostels.get(room.hostel_id)
+                        results.append(AllocationResult(
+                            student_id=member.user_id,
+                            room_id=room.id,
+                            hostel_name=hostel.name if hostel else "Unknown",
+                            room_number=room.room_number,
+                            wing=room.wing,
+                            floor=room.floor,
+                            group_id=None,
+                            happiness=50
+                        ))
+                    
+                    # Update wing capacity
+                    wing_key = self._room_to_wing_key(room)
+                    if wing_key in state.wing_capacities:
+                        state.wing_capacities[wing_key] -= unit_size
+                        
+                    allocated = True
+                    break
+            
+            if not allocated:
+                # Could not find a room for this unit
+                for member in unit:
+                    results.append(AllocationResult(
+                        student_id=member.user_id,
+                        room_id=None,
+                        hostel_name="Unallocated",
+                        room_number="Pending",
+                        reason="No available room with sufficient capacity for unit",
+                        happiness=0
+                    ))
 
-                return AllocationResult(
-                    student_id=student.user_id,
-                    room_id=room.id,
-                    hostel_name=hostel.name if hostel else "Unknown",
-                    room_number=room.room_number,
-                    wing=room.wing,
-                    floor=room.floor,
-                    group_id=None,
-                    happiness=50  # Individual allocation gets neutral happiness
-                )
-
-        return None
+        return results
     
     def run_allocation(self, mode: str = "group_based") -> List[AllocationResult]:
         """
@@ -580,63 +659,18 @@ class AllocationEngine:
         )
 
         for student in sorted_students:
-            allocated = False
             if student.user_id in state.student_allocations:
                 continue
 
-            # Get valid rooms using existing CSP logic
-            valid_rooms = self._get_valid_rooms_for_student(student)
-
-            # Sort: 1. Rule Priority (high first), 2. Occupancy (high first for consolidation)
-            valid_rooms.sort(
-                key=lambda r: (-getattr(r, 'match_priority', 0), -len(state.room_assignments.get(r.id, [])), r.id)
-            )
-
-            # Allocate to first available room
-            for room in valid_rooms:
-                current_occupancy = len(state.room_assignments.get(room.id, []))
-                if current_occupancy < room.capacity:
-                    # Update state
-                    if room.id not in state.room_assignments:
-                        state.room_assignments[room.id] = []
-                    state.room_assignments[room.id].append(student.user_id)
-                    state.student_allocations[student.user_id] = room.id
-
-                    # Update wing capacity
-                    wing_key = self._room_to_wing_key(room)
-                    if wing_key in state.wing_capacities:
-                        state.wing_capacities[wing_key] -= 1
-
-                    # Get hostel info
-                    hostel = self.hostels.get(room.hostel_id)
-
-                    # Create result
-                    results.append(AllocationResult(
-                        student_id=student.user_id,
-                        room_id=room.id,
-                        hostel_name=hostel.name if hostel else "Unknown",
-                        room_number=room.room_number,
-                        wing=room.wing,
-                        floor=room.floor,
-                        group_id=None,  # FCFS doesn't prioritize groups
-                        happiness=50  # Baseline happiness for FCFS
-                    ))
-                    allocated = True
-                    break
-
-            if not allocated:
-                reason = "No available rooms matching constraints"
-                if not valid_rooms:
-                    reason = "All matching hostels/wings are full or restricted by rules"
-                
-                results.append(AllocationResult(
-                    student_id=student.user_id,
-                    room_id=None,
-                    hostel_name="Unallocated",
-                    room_number="Pending",
-                    reason=reason,
-                    happiness=0
-                ))
+            # In FCFS, we still respect atomic roommate units
+            # Find their roommate if they have one and if they are also in this cohort
+            rm_id = self.roommate_map.get(student.user_id)
+            unit = [student]
+            if rm_id and rm_id in self.students and rm_id not in state.student_allocations:
+                unit.append(self.students[rm_id])
+            
+            unit_results = self._allocate_individuals(unit, state)
+            results.extend(unit_results)
 
         return results
 
@@ -685,36 +719,36 @@ class AllocationEngine:
                 split_results = self._allocate_group_split(wing_group, unallocated_members, state)
                 results.extend(split_results)
                 
-                # Check if some members were still not allocated after split
-                for m in unallocated_members:
-                    if m.user_id not in state.student_allocations:
-                        results.append(AllocationResult(
-                            student_id=m.user_id,
-                            room_id=None,
-                            hostel_name="Unallocated",
-                            room_number="Pending",
-                            group_id=wing_group.id,
-                            reason="Could not find enough contiguous capacity for group",
-                            happiness=0
-                        ))
+                # Note: We no longer log intermediate failures here to avoid double-counting.
+                # The final individual phase will catch these students and report them accurately.
+                pass
 
         # Allocate remaining individual students (not in any wing)
-        for student_id, student in self.students.items():
-            if student_id not in state.student_allocations:
-                result = self._allocate_individual(student, state)
-                if result:
-                    results.append(result)
-                else:
-                    results.append(AllocationResult(
-                        student_id=student_id,
-                        room_id=None,
-                        hostel_name="Unallocated",
-                        room_number="Pending",
-                        reason="No available rooms matching individual constraints",
-                        happiness=0
-                    ))
+        remaining_students = [
+            s for sid, s in self.students.items() 
+            if sid not in state.student_allocations
+        ]
+        if remaining_students:
+            results.extend(self._allocate_individuals(remaining_students, state))
 
-        return results
+        # Final cleanup: ensure each student has exactly one result
+        final_results = {}
+        for r in results:
+            if r.student_id not in final_results:
+                final_results[r.student_id] = r
+                continue
+            
+            existing = final_results[r.student_id]
+            # Priority: 
+            # 1. Successful allocation (room_id is not None)
+            # 2. Failure with a descriptive reason
+            # 3. First failure encountered
+            if existing.room_id is None and r.room_id is not None:
+                final_results[r.student_id] = r
+            elif existing.room_id is None and r.room_id is None and not existing.reason and r.reason:
+                final_results[r.student_id] = r
+                
+        return list(final_results.values())
 
     def run_group_based_allocation(self) -> List[AllocationResult]:
         """
@@ -751,33 +785,28 @@ class AllocationEngine:
                 split_results = self._allocate_group_split(group, unallocated_members, state)
                 results.extend(split_results)
                 
-                # Check if some members were still not allocated after split
-                for m in unallocated_members:
-                    if m.user_id not in state.student_allocations:
-                        results.append(AllocationResult(
-                            student_id=m.user_id,
-                            room_id=None,
-                            hostel_name="Unallocated",
-                            room_number="Pending",
-                            group_id=group.id,
-                            reason="Could not find enough contiguous capacity for group",
-                            happiness=0
-                        ))
+                # Note: No intermediate failure logs here.
+                pass
 
         # Allocate remaining individual students
-        for student_id, student in self.students.items():
-            if student_id not in state.student_allocations:
-                result = self._allocate_individual(student, state)
-                if result:
-                    results.append(result)
-                else:
-                    results.append(AllocationResult(
-                        student_id=student_id,
-                        room_id=None,
-                        hostel_name="Unallocated",
-                        room_number="Pending",
-                        reason="No available rooms matching individual constraints",
-                        happiness=0
-                    ))
+        remaining_students = [
+            s for sid, s in self.students.items() 
+            if sid not in state.student_allocations
+        ]
+        if remaining_students:
+            results.extend(self._allocate_individuals(remaining_students, state))
 
-        return results
+        # Final cleanup: ensure each student has exactly one result
+        final_results = {}
+        for r in results:
+            if r.student_id not in final_results:
+                final_results[r.student_id] = r
+                continue
+            
+            existing = final_results[r.student_id]
+            if existing.room_id is None and r.room_id is not None:
+                final_results[r.student_id] = r
+            elif existing.room_id is None and r.room_id is None and not existing.reason and r.reason:
+                final_results[r.student_id] = r
+                
+        return list(final_results.values())
