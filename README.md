@@ -6,7 +6,7 @@ An automated, intelligent hostel room allocation system built with NestJS (core 
 
 The system follows a microservices architecture:
 
-- **Core Services (NestJS)** - Authentication, user management, hostel/room management
+- **Core Services (NestJS)** - Authentication, user management, hostel/room management ([API Docs](http://localhost:3000/api/docs))
 - **Frontend (React + React Router 7)** - Student and warden dashboards
 - **Allocation Engine (Python + FastAPI)** - CSP + Bin Packing algorithm for smart allocation
 
@@ -36,8 +36,8 @@ npm run start:dev
 
 The API will be available at:
 
-- API: http://localhost:3000
-- Swagger Docs: http://localhost:3000/api/docs
+- API: <http://localhost:3000>
+- Swagger Docs: <http://localhost:3000/api/docs>
 
 ### 3. Start Frontend (React)
 
@@ -47,7 +47,7 @@ npm install
 npm run dev
 ```
 
-Frontend available at: http://localhost:5173 (or 5174)
+Frontend available at: <http://localhost:5173> (or 5174)
 
 ### 4. Start Allocation Engine (Python)
 
@@ -56,14 +56,14 @@ cd allocation-engine
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python main.py
+python -m app.main
 ```
 
-Allocation API at: http://localhost:8000
+Allocation API at: <http://localhost:8000>
 
 ## 📁 Project Structure
 
-```
+```text
 ├── core-services/          # NestJS backend
 │   ├── src/
 │   │   ├── auth/          # Authentication module
@@ -142,7 +142,7 @@ The system uses a two-stage hybrid algorithm:
 
 ## 📚 API Documentation
 
-Access Swagger UI at http://localhost:3000/api/docs for interactive API documentation.
+Access Swagger UI at <http://localhost:3000/api/docs> for interactive API documentation.
 
 ### Key Endpoints
 
@@ -173,46 +173,9 @@ JWT_SECRET=your-secret-key
 JWT_EXPIRATION=7d
 ```
 
-# Software Development Plan Updates (March 2026)
-
-## 1. Dynamic State-Driven Allocation Model
-
-The allocation system has been upgraded from a one-time static allocation flow into a dynamic, rolling allocation engine.
-
-Previously, any student with an existing `currentRoomId` was excluded from future allocation runs. This prevented:
-
-- Mid-semester room upgrades
-- Reallocation after vacancies appear
-- Re-application after eviction
-- Selective reopening for specific years/programs
-
-To solve this, allocation state is now explicitly separated from physical room assignment.
-
-### Student Allocation State
-
-The system now distinguishes between:
-
-- Physical State → the room currently occupied
-- Allocation State → whether the student should participate in the next allocation cycle
-
-New capabilities:
-
-- Students may already have a room and still re-apply
-- Administrators can reopen applications by year/program
-- Students can be relocated only if a better room is found
-- Allocation commits and evictions can be rolled back
-
----
-
-## 2. Database Schema Changes
-
-### Student Entity
-
-Added the following fields:
-
-```text
-hasSubmitted BOOLEAN NOT NULL DEFAULT false
-applicationStatus VARCHAR NOT NULL DEFAULT 'NONE'
+```sql
+hasSubmitted BOOLEAN NOT NULL DEFAULT FALSE;
+applicationStatus VARCHAR NOT NULL DEFAULT 'NONE';
 ```
 
 Purpose:
@@ -492,11 +455,11 @@ This prevents accidental displacement.
 
 ---
 
-# README.md Updates
+## ✨ Key System Features (Summary)
 
 ## Updated Features
 
-### For Students
+### Full Student Features
 
 - Register/login with JWT auth
 - Manage profile (roll number, year, gender, program)
@@ -507,7 +470,7 @@ This prevents accidental displacement.
 - Receive reset eligibility after warden approval
 - View and respond to swap requests
 
-### For Wardens/Admin
+### Full Administrative Features
 
 - Manage hostels, wings, floors, and rooms
 - Configure eligibility using Rules Matrix UI
@@ -519,7 +482,7 @@ This prevents accidental displacement.
 - Revert accidental commits/evictions
 - Automatically update room statuses during swaps/upgrades
 
-### Allocation Intelligence
+### Core Allocation Algorithm
 
 - Two-stage CSP + Bin Packing algorithm
 - Highest-priority-wins rule engine
@@ -613,7 +576,7 @@ POST /admin/rules/matrix
 - RabbitMQ integration
 - Redis caching
 - Drag-and-drop override UI
-- Add a feature to allow warden to decide to show the students, what hsotels they're eligible for and then to show them max roomate they can have which will applied hostel wise.
+- **Student Eligibility Transparency**: A feature to allow wardens to toggle visibility of hostel eligibility and max roommate limits (applied hostel-wise) on the student dashboard.
 
 ### Not Started
 

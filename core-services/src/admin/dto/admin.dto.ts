@@ -336,3 +336,15 @@ export class SaveRulesMatrixDto {
     wings: Record<string, Record<number, boolean>>;
   }>;
 }
+
+export class UpdateSystemSettingDto {
+  @ApiProperty({ example: 'show_eligibility_to_students', description: 'Setting key' })
+  @IsNotEmpty()
+  @IsString()
+  key!: string;
+
+  @ApiProperty({ example: 'true', description: 'Setting value' })
+  @IsNotEmpty()
+  @IsString()
+  value!: string;
+}

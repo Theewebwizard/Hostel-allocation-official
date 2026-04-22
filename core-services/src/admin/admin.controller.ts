@@ -366,4 +366,20 @@ export class AdminController {
   async rollbackAction(@Param('id') id: string) {
     return this.adminService.rollbackAction(id);
   }
+
+  // ============ GENERAL SETTINGS ============
+
+  @Get('settings')
+  @ApiOperation({ summary: 'Get all system settings' })
+  @ApiResponse({ status: 200, description: 'System settings retrieved' })
+  async getSystemSettings() {
+    return this.adminService.getSystemSettings();
+  }
+
+  @Post('settings')
+  @ApiOperation({ summary: 'Update a system setting' })
+  @ApiResponse({ status: 200, description: 'Setting updated' })
+  async updateSystemSetting(@Body() dto: { key: string; value: string }) {
+    return this.adminService.updateSystemSetting(dto.key, dto.value);
+  }
 }

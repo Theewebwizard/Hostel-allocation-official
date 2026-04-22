@@ -15,6 +15,7 @@ import {
   User,
   WingParticipationSetting,
 } from '../entities';
+import { AdminService, StudentEligibility } from '../admin/admin.service';
 import {
   CreateGroupDto,
   InviteMemberDto,
@@ -35,6 +36,7 @@ export class GroupsService {
     private userRepository: Repository<User>,
     @InjectRepository(WingParticipationSetting)
     private wingParticipationRepository: Repository<WingParticipationSetting>,
+    private adminService: AdminService,
   ) {}
 
   private async checkWingParticipationAllowed(year: number): Promise<void> {
@@ -47,6 +49,18 @@ export class GroupsService {
     if (!isAllowed) {
       throw new ForbiddenException(
         `Wing-based participation is not allowed for year ${year}`,
+      );
+    }
+  }
+
+  private async checkNotSubmitted(userId: string): Promise<void> {
+    const student = await this.studentRepository.findOne({
+      where: { userId },
+    });
+
+    if (student && student.hasSubmitted) {
+      throw new ForbiddenException(
+        'You cannot modify your group status after submitting your application. Withdraw your application first.',
       );
     }
   }
@@ -66,6 +80,9 @@ export class GroupsService {
 
     // Check if wing participation is allowed for this student's year
     await this.checkWingParticipationAllowed(student.year);
+
+    // Check if student has already submitted
+    await this.checkNotSubmitted(userId);
 
     // Check if user already has a group they created
     const existingGroup = await this.groupRepository.findOne({
@@ -150,6 +167,32 @@ export class GroupsService {
     };
   }
 
+  private async validateGroupSize(groupId: number, studentUserId: string) {
+    const group = await this.groupRepository.findOne({
+      where: { id: groupId },
+      relations: ['memberships'],
+    });
+
+    if (!group) return;
+
+    // Get limits for the student
+    const eligibility = await this.adminService.getStudentEligibility(studentUserId);
+    if (!eligibility.enabled) return; // If visibility is off, we still have the data but might not want to block? 
+    // Actually, we SHOULD block regardless of visibility for security.
+
+    const currentCount = group.memberships.filter(m => 
+      m.status === MembershipStatus.ACCEPTED || m.status === MembershipStatus.PENDING
+    ).length;
+
+    const maxLimit = eligibility.globalMaxGroupSize ?? 100;
+
+    if (currentCount >= maxLimit) {
+      throw new BadRequestException(
+        `Group size limit reached. Based on your eligibility, you cannot have more than ${maxLimit} people in your wing group.`,
+      );
+    }
+  }
+
   async inviteMember(
     groupId: number,
     userId: string,
@@ -168,6 +211,9 @@ export class GroupsService {
       throw new ForbiddenException('Only the group creator can invite members');
     }
 
+    // Check if creator has submitted
+    await this.checkNotSubmitted(userId);
+
     // Find the student by roll number
     const invitee = await this.studentRepository.findOne({
       where: { rollNumber: inviteDto.rollNumber },
@@ -181,6 +227,12 @@ export class GroupsService {
 
     // Check if wing participation is allowed for the invitee's year
     await this.checkWingParticipationAllowed(invitee.year);
+
+    // SECURITY CHECK: Group size limit
+    await this.validateGroupSize(groupId, userId);
+
+    // SECURITY CHECK: Eligibility & Gender overlap
+    await this.checkCompatibility(groupId, invitee);
 
     // Check if they're already in this group
     const existingMembership = await this.membershipRepository.findOne({
@@ -227,6 +279,57 @@ export class GroupsService {
     return { message: `Invitation sent to ${invitee.fullName}` };
   }
 
+  private async checkCompatibility(groupId: number, newStudent: Student) {
+    const group = await this.groupRepository.findOne({
+      where: { id: groupId },
+      relations: ['memberships', 'memberships.student'],
+    });
+
+    if (!group) return;
+
+    // 1. Gender Compatibility
+    const existingMembers = group.memberships
+      .filter(m => m.status === MembershipStatus.ACCEPTED)
+      .map(m => m.student)
+      .filter(s => !!s);
+
+    if (existingMembers.length > 0) {
+      if (existingMembers[0].gender !== newStudent.gender) {
+        throw new BadRequestException(
+          `Gender mismatch. This group is for ${existingMembers[0].gender}s.`,
+        );
+      }
+
+      // 2. Hostel Overlap Check
+      const newEligibility: StudentEligibility = await this.adminService.getStudentEligibility(newStudent.userId);
+      const newEligibleHostelIds = new Set(newEligibility.hostels.map(h => h.id));
+
+      // Check against ALL existing members to find a common overlap
+      // Start with the intersection of all existing members
+      let commonHostelIds: Set<number> | null = null;
+
+      for (const member of existingMembers) {
+        const mEligibility: StudentEligibility = await this.adminService.getStudentEligibility(member.userId);
+        const mHostelIds = new Set(mEligibility.hostels.map(h => h.id));
+        
+        if (commonHostelIds === null) {
+          commonHostelIds = mHostelIds;
+        } else {
+          commonHostelIds = new Set([...commonHostelIds].filter(id => mHostelIds.has(id)));
+        }
+      }
+
+      // Final intersection with the new student
+      const finalOverlap = [...(commonHostelIds || [])].filter(id => newEligibleHostelIds.has(id));
+
+      if (finalOverlap.length === 0) {
+        throw new BadRequestException(
+          `Eligibility mismatch. This student does not share any eligible hostels with the current group members.`,
+        );
+      }
+    }
+  }
+
   async getMyInvitations(userId: string): Promise<InvitationResponseDto[]> {
     const invitations = await this.membershipRepository.find({
       where: { userId, status: MembershipStatus.PENDING },
@@ -271,9 +374,12 @@ export class GroupsService {
         where: { userId },
       });
 
-      if (student) {
-        await this.checkWingParticipationAllowed(student.year);
+      if (!student) {
+        throw new NotFoundException('Student profile not found');
       }
+
+      await this.checkWingParticipationAllowed(student.year);
+      await this.checkNotSubmitted(userId);
 
       // Check if user is already in another group
       const otherMembership = await this.membershipRepository.findOne({
@@ -285,6 +391,13 @@ export class GroupsService {
           'You are already a member of another group. Leave that group first.',
         );
       }
+
+      // SECURITY CHECK: Group size limit (when accepting)
+      // Note: We already check during invitation, but this is a double-check
+      await this.validateGroupSize(groupId, userId);
+
+      // SECURITY CHECK: Eligibility & Gender overlap
+      await this.checkCompatibility(groupId, student);
     }
 
     membership.status = status;
@@ -316,6 +429,9 @@ export class GroupsService {
       );
     }
 
+    // Check if student has submitted
+    await this.checkNotSubmitted(userId);
+
     await this.membershipRepository.remove(membership);
 
     return { message: 'You have left the group' };
@@ -338,6 +454,9 @@ export class GroupsService {
         'Only the group creator can delete the group',
       );
     }
+
+    // Check if creator has submitted
+    await this.checkNotSubmitted(userId);
 
     // Delete all memberships first (cascade should handle this, but being explicit)
     await this.membershipRepository.delete({ groupId });
@@ -364,6 +483,9 @@ export class GroupsService {
     if (group.creatorId !== creatorUserId) {
       throw new ForbiddenException('Only the group creator can remove members');
     }
+
+    // Check if creator has submitted
+    await this.checkNotSubmitted(creatorUserId);
 
     if (memberUserId === creatorUserId) {
       throw new ForbiddenException(

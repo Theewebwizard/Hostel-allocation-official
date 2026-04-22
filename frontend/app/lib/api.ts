@@ -106,6 +106,18 @@ export const studentsApi = {
   ) => api.patch(`/students/${userId}`, data),
   getEligibleForSwap: () => api.get<Student[]>("/students/eligible-for-swap"),
   submitApplication: () => api.post("/students/me/apply"),
+  getMyEligibility: () => api.get<{
+    enabled: boolean;
+    showRoommateLimits: boolean;
+    hostels: {
+      id: number;
+      name: string;
+      wings: {
+        name: string;
+        maxRoommates: number;
+      }[];
+    }[];
+  }>("/students/me/eligibility"),
 };
 
 // Groups API
@@ -350,6 +362,11 @@ export const adminApi = {
     api.get<{ enabled: boolean }>("/admin/applications-enabled"),
   setApplicationsEnabled: (enabled: boolean) =>
     api.post<{ enabled: boolean }>("/admin/applications-enabled", { enabled }),
+  
+  // General Settings
+  getSystemSettings: () => api.get<Record<string, string>>("/admin/settings"),
+  updateSystemSetting: (key: string, value: string) =>
+    api.post<any>("/admin/settings", { key, value }),
 };
 
 export const allocationApi = {

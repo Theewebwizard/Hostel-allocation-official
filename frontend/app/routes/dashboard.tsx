@@ -11,6 +11,7 @@ import {
   Play,
   CheckCircle,
   XCircle,
+  Info,
 } from "lucide-react";
 import { DashboardLayout } from "~/components/layout/DashboardLayout";
 import {
@@ -67,6 +68,7 @@ function StudentDashboard() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [appsEnabled, setAppsEnabled] = useState(true);
+  const [eligibility, setEligibility] = useState<any>(null);
 
   const handleApply = async () => {
     if (
@@ -99,6 +101,7 @@ function StudentDashboard() {
           groupsApi.getMyInvitations(),
           studentsApi.getMe(),
           adminApi.getApplicationsEnabled().catch(() => ({ data: { enabled: true } })),
+          studentsApi.getMyEligibility().catch(() => ({ data: { enabled: false, hostels: [] } })),
         ]);
 
         if (groupRes.data) {
@@ -110,6 +113,7 @@ function StudentDashboard() {
           setCurrentRoom(meRes.data.currentRoom);
         }
         setAppsEnabled(statusRes.data.enabled ?? true);
+        setEligibility(eligibilityRes.data);
       } catch (err) {
         console.error("Failed to fetch dashboard data", err);
       }
@@ -265,6 +269,55 @@ function StudentDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {eligibility?.enabled && eligibility.hostels?.length > 0 && (
+        <Card className="mt-6 border-indigo-100 bg-gradient-to-br from-white to-indigo-50/30 overflow-hidden">
+          <CardHeader className="border-b border-indigo-100/50 bg-white/50">
+            <CardTitle className="flex items-center gap-2 text-slate-900">
+              <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                <Info className="w-5 h-5 text-indigo-600" />
+              </div>
+              Your Allocation Eligibility
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <p className="text-sm text-slate-500 mb-4">
+              Based on your year and program, you are eligible to apply for the following hostels.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {eligibility.hostels.map((hostel: any) => (
+                <div key={hostel.id} className="p-4 bg-white rounded-xl border border-indigo-100 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100">
+                    <Building2 className="w-4 h-4 text-indigo-500" />
+                    <p className="font-bold text-slate-900">{hostel.name}</p>
+                  </div>
+                  <div className="space-y-2">
+                    {hostel.wings.map((wing: any) => (
+                      <div key={wing.name} className="flex flex-col gap-1">
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-slate-600 font-medium">{wing.name} Wing</span>
+                          <div className="flex items-center gap-2">
+                            {eligibility.showRoommateLimits && (
+                              <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold border border-indigo-100">
+                                MAX {wing.maxRoommates} ROOMMATES
+                              </span>
+                            )}
+                            {eligibility.showBatchCapacity && (
+                              <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold border border-slate-200">
+                                {wing.totalSpots} TOTAL SPOTS
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </>
   );
 }

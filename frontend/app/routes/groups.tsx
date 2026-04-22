@@ -33,6 +33,7 @@ import {
   type Group,
   type Invitation,
   type RoommateInvitation,
+  studentsApi,
 } from "~/lib/api";
 
 export function meta() {
@@ -69,6 +70,7 @@ export default function GroupsPage() {
   const [allocationPolicy, setAllocationPolicy] = useState<string>("group_based");
   const [isSendingRoommateInvite, setIsSendingRoommateInvite] = useState(false);
   const [selectedRoommateId, setSelectedRoommateId] = useState<string>("");
+  const [eligibility, setEligibility] = useState<any>(null);
 
   useEffect(() => {
     checkAuth();
@@ -96,11 +98,13 @@ export default function GroupsPage() {
         groupsApi.getMyInvitations(),
         roommateInvitationsApi.getMyInvitations(),
         adminApi.getAllocationPolicy(),
+        studentsApi.getMyEligibility().catch(() => ({ data: { enabled: false } })),
       ]);
       setMyGroup(groupRes.data);
       setInvitations(invRes.data);
       setRoommateInvitations(rmInvRes.data);
       setAllocationPolicy(policyRes.data.policy);
+      setEligibility(eligibilityRes.data);
     } catch (err) {
       console.error("Error loading data:", err);
     } finally {
@@ -305,6 +309,33 @@ export default function GroupsPage() {
           </p>
         </div>
 
+        {/* Group Constraints Callout */}
+        {eligibility?.enabled && (
+          <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+            <div className="flex-1 md:flex items-center justify-between gap-4">
+              <div>
+                <p className="font-bold text-indigo-900">Group Formation Constraints</p>
+                <p className="text-sm text-indigo-700">
+                  Based on your batch's eligible hostels, your group is restricted to a maximum of{" "}
+                  <strong>{eligibility.globalMaxGroupSize} members</strong>. 
+                  Individual rooms support up to <strong>{eligibility.globalMaxRoommates} roommates</strong>.
+                </p>
+              </div>
+              <div className="mt-2 md:mt-0 flex gap-2">
+                <div className="px-3 py-1 bg-white rounded-lg border border-indigo-200 text-center">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Max Wing Group</p>
+                  <p className="text-lg font-bold text-indigo-700 leading-tight">{eligibility.globalMaxGroupSize}</p>
+                </div>
+                <div className="px-3 py-1 bg-white rounded-lg border border-indigo-200 text-center">
+                  <p className="text-[10px] text-slate-500 uppercase font-black">Max Roommates</p>
+                  <p className="text-lg font-bold text-indigo-700 leading-tight">{eligibility.globalMaxRoommates}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
             {error}
@@ -463,22 +494,29 @@ export default function GroupsPage() {
               {/* Invite Form (only for creator) */}
               {isCreator && (
                 <div>
-                  <h3 className="font-bold text-slate-900 mb-3">Invite Member</h3>
-                  <form onSubmit={handleInvite} className="flex gap-2">
-                    <div className="flex-1 relative">
-                      <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                      <Input
-                        type="text"
-                        placeholder="Enter roll number (e.g., 20BCE1234)"
-                        value={inviteRollNumber}
-                        onChange={(e) => setInviteRollNumber(e.target.value)}
-                        className="pl-10"
-                      />
+                  <h3 className="font-bold text-slate-900 mb-1">Invite Member</h3>
+                  {eligibility && myGroup.members.length >= eligibility.globalMaxGroupSize ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" />
+                      Group size limit reached ({eligibility.globalMaxGroupSize}). You cannot invite more members.
                     </div>
-                    <Button type="submit" disabled={isInviting}>
-                      {isInviting ? "Sending..." : "Send Invite"}
-                    </Button>
-                  </form>
+                  ) : (
+                    <form onSubmit={handleInvite} className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <Input
+                          type="text"
+                          placeholder="Enter roll number (e.g., 20BCE1234)"
+                          value={inviteRollNumber}
+                          onChange={(e) => setInviteRollNumber(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                      <Button type="submit" disabled={isInviting}>
+                        {isInviting ? "Sending..." : "Send Invite"}
+                      </Button>
+                    </form>
+                  )}
                 </div>
               )}
 

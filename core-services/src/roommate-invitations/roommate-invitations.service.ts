@@ -1,8 +1,5 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -41,11 +38,24 @@ export class RoommateInvitationsService {
     }
   }
 
+  private async checkNotSubmitted(userId: string): Promise<void> {
+    const student = await this.studentRepository.findOne({
+      where: { userId },
+    });
+
+    if (student && student.hasSubmitted) {
+      throw new ForbiddenException(
+        'You cannot modify your roommate status after submitting your application. Withdraw your application first.',
+      );
+    }
+  }
+
   async sendInvitation(
     senderId: string,
     dto: SendRoommateInvitationDto,
   ) {
     await this.checkFcfsMode();
+    await this.checkNotSubmitted(senderId);
 
     // 1. Check if sender is in a group
     const senderMembership = await this.membershipRepository.findOne({
@@ -135,6 +145,7 @@ export class RoommateInvitationsService {
     dto: RespondToInvitationDto,
   ) {
     await this.checkFcfsMode();
+    await this.checkNotSubmitted(userId);
 
     const invitation = await this.invitationRepository.findOne({
       where: { id: invitationId, receiverId: userId },

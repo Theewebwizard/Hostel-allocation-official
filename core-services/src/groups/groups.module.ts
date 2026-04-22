@@ -10,6 +10,8 @@ import {
   WingParticipationSetting,
 } from '../entities';
 
+import { AdminModule } from '../admin/admin.module';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -19,6 +21,7 @@ import {
       User,
       WingParticipationSetting,
     ]),
+    AdminModule,
   ],
   controllers: [GroupsController],
   providers: [GroupsService],

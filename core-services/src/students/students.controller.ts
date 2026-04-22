@@ -17,13 +17,17 @@ import {
 import { StudentsService } from './students.service';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminService } from '../admin/admin.service';
 
 @ApiTags('students')
 @Controller('students')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class StudentsController {
-  constructor(private readonly studentsService: StudentsService) {}
+  constructor(
+    private readonly studentsService: StudentsService,
+    private readonly adminService: AdminService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all students' })
@@ -38,6 +42,13 @@ export class StudentsController {
   @ApiResponse({ status: 404, description: 'Student not found' })
   findMe(@Request() req) {
     return this.studentsService.findOne(req.user.id);
+  }
+
+  @Get('me/eligibility')
+  @ApiOperation({ summary: 'Get student eligibility transparency' })
+  @ApiResponse({ status: 200, description: 'Eligibility data' })
+  findMyEligibility(@Request() req) {
+    return this.adminService.getStudentEligibility(req.user.id);
   }
 
   @Get('eligible-for-swap')

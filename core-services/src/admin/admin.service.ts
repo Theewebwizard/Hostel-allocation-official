@@ -33,7 +33,26 @@ import {
   CreateRuleDto,
   UpdateRuleDto,
   BulkCreateRoomsDto,
+  UpdateSystemSettingDto,
 } from './dto/admin.dto';
+
+export interface StudentEligibility {
+  enabled: boolean;
+  showRoommateLimits?: boolean;
+  showBatchCapacity?: boolean;
+  globalMaxGroupSize?: number;
+  globalMaxRoommates?: number;
+  hostels: {
+    id: number;
+    name: string;
+    wings: {
+      name: string;
+      maxRoommates: number;
+      totalSpots: number;
+    }[];
+  }[];
+}
+
 import { ConfigService } from '@nestjs/config';
 import { DecisionsService } from '../decisions/decisions.service';
 
@@ -281,6 +300,16 @@ export class AdminService {
     });
   }
 
+  async getRunById(id: string): Promise<AllocationRun> {
+    const run = await this.runRepository.findOne({
+      where: { id },
+    });
+    if (!run) {
+      throw new NotFoundException('Run not found');
+    }
+    return run;
+  }
+
   async getRuleById(id: number): Promise<AllocationRule> {
     const rule = await this.ruleRepository.findOne({
       where: { id },
@@ -318,51 +347,67 @@ export class AdminService {
     targetYears?: number[],
     targetPrograms?: string[],
   ): Promise<AllocationRun> {
-    // Check if there's an un-finalized draft or running allocation
-    const pendingRun = await this.runRepository.findOne({
-      where: [
-        { status: AllocationRunStatus.QUEUED },
-        { status: AllocationRunStatus.RUNNING },
-        { status: AllocationRunStatus.COMPLETED, finalized: false }
-      ]
-    });
+    const queryRunner = this.runRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction('SERIALIZABLE');
 
-    if (pendingRun) {
-      throw new BadRequestException(
-        'Cannot trigger new allocation. Please Publish & Commit (or delete) your current draft first.',
-      );
+    try {
+      // Check if there's an un-finalized draft or running allocation
+      const pendingRun = await queryRunner.manager.findOne(AllocationRun, {
+        where: [
+          { status: AllocationRunStatus.QUEUED },
+          { status: AllocationRunStatus.RUNNING },
+          { status: AllocationRunStatus.COMPLETED, finalized: false }
+        ]
+      });
+
+      if (pendingRun) {
+        throw new BadRequestException(
+          'Cannot trigger new allocation. Please Publish & Commit (or delete) your current draft first.',
+        );
+      }
+
+      // Get current rules for snapshot
+      const rules = await queryRunner.manager.find(AllocationRule);
+
+      // Create allocation run record
+      const run = queryRunner.manager.create(AllocationRun, {
+        triggeredById: userId,
+        status: AllocationRunStatus.QUEUED,
+        allocationMode,
+        targetYears: targetYears || null,
+        targetPrograms: targetPrograms || null,
+        rulesSnapshot: rules.map((r) => ({
+          id: r.id,
+          hostelId: r.hostelId,
+          year: r.year,
+          roomType: r.roomType,
+          isAllowed: r.isAllowed,
+          priority: r.priority,
+          wing: r.wing,
+        })),
+      });
+
+      const savedRun = await queryRunner.manager.save(AllocationRun, run);
+      await queryRunner.commitTransaction();
+
+      // Trigger background processing (no need to wait for it)
+      this.processAllocationInBackground(savedRun.id, rules, allocationMode, targetYears, targetPrograms);
+
+      return savedRun;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
+  }
 
-    // Get current rules for snapshot
-    const rules = await this.getAllRules();
-
-    // Create allocation run record
-    const run = this.runRepository.create({
-      triggeredById: userId,
-      status: AllocationRunStatus.QUEUED,
-      allocationMode,
-      targetYears: targetYears || null,
-      targetPrograms: targetPrograms || null,
-      rulesSnapshot: rules.map((r) => ({
-        id: r.id,
-        hostelId: r.hostelId,
-        year: r.year,
-        roomType: r.roomType,
-        isAllowed: r.isAllowed,
-        priority: r.priority,
-        wing: r.wing,
-      })),
-    });
-
-    await this.runRepository.save(run);
-
-    // Trigger allocation engine asynchronously
-    this.callAllocationEngine(run.id, rules, allocationMode, targetYears, targetPrograms).catch((error) => {
+  private async processAllocationInBackground(runId: string, rules: AllocationRule[], allocationMode: AllocationMode, targetYears?: number[], targetPrograms?: string[]) {
+    this.callAllocationEngine(runId, rules, allocationMode, targetYears, targetPrograms).catch((error) => {
       console.error('Allocation engine error:', error);
-      this.updateRunStatus(run.id, AllocationRunStatus.FAILED, error.message);
+      this.updateRunStatus(runId, AllocationRunStatus.FAILED, error.message);
     });
-
-    return run;
   }
 
   private async callAllocationEngine(
@@ -1269,5 +1314,140 @@ export class AdminService {
     }
 
     return { enabled };
+  }
+
+  // ============ SYSTEM SETTINGS (GENERAL) ============
+  async getSystemSettings(): Promise<Record<string, string>> {
+    const settings = await this.systemSettingRepository.find();
+    const result: Record<string, string> = {};
+    settings.forEach((s) => (result[s.key] = s.value));
+    return result;
+  }
+
+  async updateSystemSetting(key: string, value: string): Promise<SystemSetting> {
+    let setting = await this.systemSettingRepository.findOne({ where: { key } });
+    if (setting) {
+      setting.value = value;
+    } else {
+      setting = this.systemSettingRepository.create({ key, value });
+    }
+    return this.systemSettingRepository.save(setting);
+  }
+
+  // ============ STUDENT ELIGIBILITY ============
+  async getStudentEligibility(userId: string): Promise<StudentEligibility> {
+    const student = await this.studentRepository.findOne({ where: { userId } });
+    if (!student) throw new NotFoundException('Student not found');
+
+    const settings = await this.getSystemSettings();
+    const showEligibility = settings['show_eligibility_to_students'] === 'true';
+    const showBatchCapacity = settings['show_batch_capacity_to_students'] === 'true';
+    
+    if (!showEligibility) {
+      return { enabled: false, hostels: [] };
+    }
+
+    const hostels = await this.hostelRepository.find({ relations: ['rooms'] });
+    const allRules = await this.ruleRepository.find({ order: { priority: 'DESC' } });
+
+    const eligibleHostels: {
+      id: number;
+      name: string;
+      wings: {
+        name: string;
+        maxRoommates: number;
+        totalSpots: number;
+      }[];
+    }[] = [];
+
+    for (const hostel of hostels) {
+      if (hostel.genderType === 'male' && student.gender !== 'male') continue;
+      if (hostel.genderType === 'female' && student.gender !== 'female') continue;
+
+      const wingsMap = new Map<string, any>();
+
+      hostel.rooms.forEach((room) => {
+        const wingName = room.wing || 'Default';
+        if (!wingsMap.has(wingName)) {
+          wingsMap.set(wingName, {
+            name: wingName,
+            maxCapacity: 0,
+            totalCohortSpots: 0,
+            isAllowed: true, 
+          });
+        }
+        const wing = wingsMap.get(wingName);
+        
+        // We calculate max roommate limit from physical room capacity
+        if (room.capacity > wing.maxCapacity) {
+          wing.maxCapacity = room.capacity;
+        }
+
+        // We will sum spots only if the cohort is allowed in this specific wing
+        // But we check rule for the WHOLE WING first to avoid per-room loops later
+      });
+
+      const allowedWings: {
+        name: string;
+        maxRoommates: number;
+        totalSpots: number;
+      }[] = [];
+      for (const [wingName, wingInfo] of wingsMap.entries()) {
+        let isBlocked = false;
+        
+        for (const rule of allRules) {
+          const hostelMatch = !rule.hostelId || rule.hostelId === hostel.id;
+          const yearMatch = !rule.year || rule.year === student.year;
+          const wingMatch = !rule.wing || rule.wing === wingName;
+
+          if (hostelMatch && yearMatch && wingMatch) {
+            if (!rule.isAllowed) {
+              isBlocked = true;
+            }
+            break; 
+          }
+        }
+
+        if (!isBlocked) {
+          // Calculate total spots for this cohort in this wing
+          const cohortSpots = hostel.rooms
+            .filter(r => (r.wing || 'Default') === wingName)
+            .reduce((sum, r) => sum + r.capacity, 0);
+
+          allowedWings.push({
+            name: wingName,
+            maxRoommates: Math.max(0, wingInfo.maxCapacity - 1),
+            totalSpots: cohortSpots,
+          });
+        }
+      }
+
+    if (allowedWings.length > 0) {
+        eligibleHostels.push({
+          id: hostel.id,
+          name: hostel.name,
+          wings: allowedWings,
+        });
+      }
+    }
+
+    const globalMaxGroupSize = eligibleHostels.reduce((max, h) => {
+      const hostelMax = h.wings.reduce((wm, w) => Math.max(wm, w.totalSpots), 0);
+      return Math.max(max, hostelMax);
+    }, 0);
+
+    const globalMaxRoommates = eligibleHostels.reduce((max, h) => {
+      const hostelMax = h.wings.reduce((wm, w) => Math.max(wm, w.maxRoommates), 0);
+      return Math.max(max, hostelMax);
+    }, 0);
+
+    return {
+      enabled: true,
+      showRoommateLimits: settings['show_roommate_limits_to_students'] === 'true',
+      showBatchCapacity,
+      globalMaxGroupSize,
+      globalMaxRoommates,
+      hostels: eligibleHostels,
+    };
   }
 }

@@ -19,6 +19,7 @@ import {
   Hostel,
   AllocationRun,
 } from '../entities';
+import { AdminService, StudentEligibility } from '../admin/admin.service';
 import {
   CreateSwapRequestDto,
   RespondSwapRequestDto,
@@ -41,6 +42,7 @@ export class SwapsService {
     private hostelRepository: Repository<Hostel>,
     @InjectRepository(AllocationRun)
     private runRepository: Repository<AllocationRun>,
+    private adminService: AdminService,
   ) {}
 
   // ============ STUDENT ACTIONS ============
@@ -102,7 +104,7 @@ export class SwapsService {
       order: { createdAt: 'DESC' },
     });
 
-    return requests.map(this.mapToResponseDto);
+    return requests.map((req) => this.mapToResponseDto(req));
   }
 
   async getIncomingSwapRequests(
@@ -123,7 +125,7 @@ export class SwapsService {
       order: { createdAt: 'DESC' },
     });
 
-    return requests.map(this.mapToResponseDto);
+    return requests.map((req) => this.mapToResponseDto(req));
   }
 
   async respondToSwapRequest(
@@ -247,6 +249,32 @@ export class SwapsService {
         );
       }
     }
+
+    // ELIGIBILITY CHECK: Is requester eligible for target's room?
+    const reqEligibility: StudentEligibility = await this.adminService.getStudentEligibility(requester.userId);
+    const targetRoomHostelId = targetStudent.currentRoom.hostelId;
+    const targetRoomWing = targetStudent.currentRoom.wing || 'Default';
+    
+    const isReqEligible = reqEligibility.hostels.some(h => 
+      h.id === targetRoomHostelId && h.wings.some(w => w.name === targetRoomWing)
+    );
+
+    if (!isReqEligible) {
+      throw new BadRequestException(`You are not eligible for the target room in ${targetStudent.currentRoom.hostel.name}`);
+    }
+
+    // ELIGIBILITY CHECK: Is target eligible for requester's room?
+    const targetEligibility: StudentEligibility = await this.adminService.getStudentEligibility(targetStudentId);
+    const reqRoomHostelId = requester.currentRoom.hostelId;
+    const reqRoomWing = requester.currentRoom.wing || 'Default';
+
+    const isTargetEligible = targetEligibility.hostels.some(h => 
+      h.id === reqRoomHostelId && h.wings.some(w => w.name === reqRoomWing)
+    );
+
+    if (!isTargetEligible) {
+      throw new BadRequestException(`Target student is not eligible for your room in ${requester.currentRoom.hostel.name}`);
+    }
   }
 
   async validateSwapChain(swapRequestIds: number[]): Promise<{
@@ -303,6 +331,21 @@ export class SwapsService {
         currentRoomId: req.requesterRoomId,
         targetRoomId: req.targetRoomId || 0,
       });
+
+      // Chain Eligibility Validation
+      if (req.targetRoom) {
+        const eligibility: StudentEligibility = await this.adminService.getStudentEligibility(req.requesterId);
+        const targetHostelId = req.targetRoom.hostelId;
+        const targetWing = req.targetRoom.wing || 'Default';
+        
+        const isEligible = eligibility.hostels.some(h => 
+          h.id === targetHostelId && h.wings.some(w => w.name === targetWing)
+        );
+
+        if (!isEligible) {
+          errors.push(`${req.requester.fullName} is not eligible for room ${req.targetRoom.roomNumber} in ${req.targetRoom.hostel?.name}`);
+        }
+      }
     }
 
     const chainId = uuidv4();
@@ -444,7 +487,7 @@ export class SwapsService {
       order: { createdAt: 'DESC' },
     });
 
-    return requests.map(this.mapToResponseDto);
+    return requests.map((req) => this.mapToResponseDto(req));
   }
 
   async executeDirectSwap(
@@ -644,33 +687,35 @@ export class SwapsService {
 
   // ============ HELPERS ============
 
-  private mapToResponseDto = (req: SwapRequest): SwapRequestResponseDto => ({
-    id: req.id,
-    requesterId: req.requesterId,
-    requesterName: req.requester?.fullName || 'Unknown',
-    requesterRollNumber: req.requester?.rollNumber || 'Unknown',
-    requesterRoom: {
-      id: req.requesterRoom?.id,
-      roomNumber: req.requesterRoom?.roomNumber,
-      hostelName: req.requesterRoom?.hostel?.name || 'Unknown',
-      wing: req.requesterRoom?.wing,
-      floor: req.requesterRoom?.floor,
-    },
-    targetStudentId: req.targetStudentId,
-    targetStudentName: req.targetStudent?.fullName,
-    targetRoom: req.targetRoom
-      ? {
-          id: req.targetRoom.id,
-          roomNumber: req.targetRoom.roomNumber,
-          hostelName: req.targetRoom.hostel?.name || 'Unknown',
-          wing: req.targetRoom.wing,
-          floor: req.targetRoom.floor,
-        }
-      : undefined,
-    status: req.status,
-    swapType: req.swapType,
-    reason: req.reason,
-    createdAt: req.createdAt,
-    expiresAt: req.expiresAt,
-  });
+  private mapToResponseDto(req: SwapRequest): SwapRequestResponseDto {
+    return {
+      id: req.id,
+      requesterId: req.requesterId,
+      requesterName: req.requester?.fullName || 'Unknown',
+      requesterRollNumber: req.requester?.rollNumber || 'Unknown',
+      requesterRoom: {
+        id: req.requesterRoom?.id,
+        roomNumber: req.requesterRoom?.roomNumber,
+        hostelName: req.requesterRoom?.hostel?.name || 'Unknown',
+        wing: req.requesterRoom?.wing,
+        floor: req.requesterRoom?.floor,
+      },
+      targetStudentId: req.targetStudentId,
+      targetStudentName: req.targetStudent?.fullName,
+      targetRoom: req.targetRoom
+        ? {
+            id: req.targetRoom.id,
+            roomNumber: req.targetRoom.roomNumber,
+            hostelName: req.targetRoom.hostel?.name || 'Unknown',
+            wing: req.targetRoom.wing,
+            floor: req.targetRoom.floor,
+          }
+        : undefined,
+      status: req.status,
+      swapType: req.swapType,
+      reason: req.reason,
+      createdAt: req.createdAt,
+      expiresAt: req.expiresAt,
+    };
+  }
 }

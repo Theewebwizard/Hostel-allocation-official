@@ -11,6 +11,8 @@ import {
 import { SwapsService } from './swaps.service';
 import { SwapsController } from './swaps.controller';
 
+import { AdminModule } from '../admin/admin.module';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -21,6 +23,7 @@ import { SwapsController } from './swaps.controller';
       Hostel,
       AllocationRun,
     ]),
+    AdminModule,
   ],
   controllers: [SwapsController],
   providers: [SwapsService],

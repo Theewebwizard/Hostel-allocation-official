@@ -121,6 +121,7 @@ export default function AdminPage() {
 
   // Mid-Session Operations States
   const [isEvicting, setIsEvicting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [evictionSummary, setEvictionSummary] = useState<any[] | null>(null);
   const [parsedRollNumbers, setParsedRollNumbers] = useState<string[]>([]);
   const [resetYear, setResetYear] = useState<string>("all");
@@ -162,6 +163,12 @@ export default function AdminPage() {
   const [savedApplicationsEnabled, setSavedApplicationsEnabled] =
     useState(true);
   const [isSavingAppStatus, setIsSavingAppStatus] = useState(false);
+
+  // Transparency Settings
+  const [showEligibility, setShowEligibility] = useState(false);
+  const [showRoommateLimits, setShowRoommateLimits] = useState(false);
+  const [showBatchCapacity, setShowBatchCapacity] = useState(false);
+  const [isSavingTransparency, setIsSavingTransparency] = useState(false);
 
   // Form data
   const [hostelForm, setHostelForm] = useState({
@@ -269,6 +276,7 @@ export default function AdminPage() {
         hierarchyRes,
         appStatusRes,
         actionsRes,
+        settingsRes,
       ] = await Promise.all([
         adminApi.getDashboardStats(),
         adminApi.getAllHostels(),
@@ -284,6 +292,7 @@ export default function AdminPage() {
         adminApi.getHostelHierarchy().catch(() => ({ data: [] })),
         adminApi.getApplicationsEnabled().catch(() => ({ data: { enabled: true } })),
         adminApi.getAdminActions().catch(() => ({ data: [] })),
+        adminApi.getSystemSettings().catch(() => ({ data: {} })),
       ]);
       setStats(statsRes.data);
       setHostels(hostelsRes.data);
@@ -301,6 +310,11 @@ export default function AdminPage() {
       setSavedApplicationsEnabled(appStatusRes.data.enabled ?? true);
       setGroups(groupsRes.data || []);
       setAdminActions(actionsRes.data || []);
+      
+      const settings = (settingsRes.data || {}) as Record<string, string>;
+      setShowEligibility(settings.show_eligibility_to_students === "true");
+      setShowRoommateLimits(settings.show_roommate_limits_to_students === "true");
+      setShowBatchCapacity(settings.show_batch_capacity_to_students === "true");
     } catch (err: any) {
       if (err.response?.status !== 401) {
         setError("Failed to load data. Make sure the backend is running.");
@@ -495,8 +509,7 @@ export default function AdminPage() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const processEvictionFile = (file: File) => {
     if (!file) return;
 
     const reader = new FileReader();
@@ -504,11 +517,9 @@ export default function AdminPage() {
       const text = event.target?.result as string;
       if (!text) return;
 
-      // Parse CSV: split by newlines, then by common separators, take first column, filter out header/empty
       const lines = text.split(/\r?\n/);
       const rollNumbers = lines
         .map(line => {
-          // Support multiple separators: comma, pipe, tab, semicolon
           const separators = [',', '|', '\t', ';'];
           let firstCol = line;
           
@@ -526,11 +537,47 @@ export default function AdminPage() {
           const lower = rn.toLowerCase();
           return lower !== 'roll number' && lower !== 'rollnumber' && lower !== 'roll_number';
         });
-      
-      setParsedRollNumbers([...new Set(rollNumbers)]); // Use Set to avoid duplicates
-      setEvictionSummary(null); // Clear previous summary when new file loaded
+
+      if (rollNumbers.length === 0) {
+        setError("No valid roll numbers found in the CSV");
+        return;
+      }
+
+      setParsedRollNumbers([...new Set(rollNumbers)]);
+      setEvictionSummary(null);
+      setSuccess(`${rollNumbers.length} roll numbers parsed. Ready for eviction.`);
     };
     reader.readAsText(file);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processEvictionFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    
+    const file = e.dataTransfer.files?.[0];
+    if (file && (file.type === "text/csv" || file?.name.endsWith(".csv"))) {
+      processEvictionFile(file);
+    } else {
+      setError("Please drop a valid CSV file");
+    }
   };
 
   const handleBulkEvict = async () => {
@@ -683,6 +730,20 @@ export default function AdminPage() {
       s.fullName.toLowerCase().includes(studentSearchQuery.toLowerCase());
     return matchesYear && matchesProgram && matchesGender && matchesSearch;
   });
+
+  const handleSaveTransparency = async () => {
+    setIsSavingTransparency(true);
+    try {
+      await adminApi.updateSystemSetting("show_eligibility_to_students", showEligibility ? "true" : "false");
+      await adminApi.updateSystemSetting("show_roommate_limits_to_students", showRoommateLimits ? "true" : "false");
+      await adminApi.updateSystemSetting("show_batch_capacity_to_students", showBatchCapacity ? "true" : "false");
+      setSuccess("Transparency settings saved");
+    } catch (err) {
+      setError("Failed to save transparency settings");
+    } finally {
+      setIsSavingTransparency(false);
+    }
+  };
 
   const sidebarItems = [
     { id: "hostels", label: "Hostels", icon: Building2, count: hostels.length },
@@ -2032,7 +2093,16 @@ export default function AdminPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-col md:flex-row gap-4 items-start">
-                    <div className="flex-1 w-full p-6 border-2 border-dashed border-amber-300 rounded-xl bg-white hover:border-amber-400 transition-colors group">
+                    <div 
+                      className={`flex-1 w-full p-6 border-2 border-dashed rounded-xl transition-all group ${
+                        isDragging 
+                          ? "border-amber-500 bg-amber-100/50 scale-[1.02]" 
+                          : "border-amber-300 bg-white hover:border-amber-400"
+                      }`}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                    >
                       <input
                         type="file"
                         accept=".csv"
@@ -3015,6 +3085,106 @@ export default function AdminPage() {
                         </>
                       ) : (
                         "Save Status"
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-indigo-100 bg-white">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-slate-900">
+                    <Info className="w-5 h-5 text-indigo-600" />
+                    Student Eligibility Transparency
+                  </CardTitle>
+                  <CardDescription>
+                    Control what information students can see on their dashboard before applying.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <div>
+                        <p className="font-bold text-slate-900">Show Eligible Hostels</p>
+                        <p className="text-sm text-slate-500">
+                          Students will see a list of hostels they are eligible for based on the rules matrix.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setShowEligibility(!showEligibility)}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${
+                          showEligibility ? "bg-indigo-600" : "bg-slate-300"
+                        }`}
+                      >
+                        <div
+                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                            showEligibility ? "left-7" : "left-1"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <div>
+                        <p className="font-bold text-slate-900">Show Roommate Limits</p>
+                        <p className="text-sm text-slate-500">
+                          Show students the maximum number of roommates they can have for each eligible hostel.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setShowRoommateLimits(!showRoommateLimits)}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${
+                          showRoommateLimits ? "bg-indigo-600" : "bg-slate-300"
+                        }`}
+                        disabled={!showEligibility}
+                      >
+                        <div
+                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                            showRoommateLimits ? "left-7" : "left-1"
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <div>
+                        <p className="font-bold text-slate-900">Show Total Batch Spots</p>
+                        <p className="text-sm text-slate-500">
+                          Show students the total number of beds available for their batch (Year/Program) in each wing.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setShowBatchCapacity(!showBatchCapacity)}
+                        className={`w-12 h-6 rounded-full transition-colors relative ${
+                          showBatchCapacity ? "bg-indigo-600" : "bg-slate-300"
+                        }`}
+                        disabled={!showEligibility}
+                      >
+                        <div
+                          className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                            showBatchCapacity ? "left-7" : "left-1"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 pt-2">
+                    <Button
+                      onClick={handleSaveTransparency}
+                      disabled={isSavingTransparency}
+                      className="px-8"
+                    >
+                      {isSavingTransparency ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 mr-2" />
+                          Save Transparency Settings
+                        </>
                       )}
                     </Button>
                   </div>
