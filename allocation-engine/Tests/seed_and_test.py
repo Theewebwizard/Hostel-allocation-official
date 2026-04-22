@@ -122,55 +122,47 @@ def create_rooms_with_capacity(hostel_id, wing, floors, rooms_per_floor, capacit
 def setup_hostels():
     print("\n🏗️ Building Hostels and Rooms...")
     hostel_ids = {}
-    
-    # BH1: Senior/Junior mixed
     h1 = create_hostel("BH1", "male")
     if h1:
         hostel_ids['BH1'] = h1
-        # Floors G, 1, 2: Wings C, D, E for Year 1 (30 rooms * 3 wings * 3 beds = 270 beds)
-        create_rooms_with_capacity(h1, 'C', [0, 1, 2], 10, 3, "triple")
-        create_rooms_with_capacity(h1, 'D', [0, 1, 2], 10, 3, "triple")
-        create_rooms_with_capacity(h1, 'E', [0, 1, 2], 10, 3, "triple")
-        # Floor 3: All wings (mostly Year 4)
-        create_rooms_with_capacity(h1, 'A', [3], 10, 1, "single")
-        create_rooms_with_capacity(h1, 'B', [3], 10, 1, "single")
-        create_rooms_with_capacity(h1, 'C', [3], 10, 3, "triple")
-        create_rooms_with_capacity(h1, 'D', [3], 10, 3, "triple")
-        create_rooms_with_capacity(h1, 'E', [3], 10, 3, "triple")
+        # Increased floors and wings for Year 1 (300+ beds)
+        create_rooms_with_capacity(h1, 'C', [0, 1, 2, 3], 15, 3, "triple")
+        create_rooms_with_capacity(h1, 'D', [0, 1, 2, 3], 15, 3, "triple")
+        create_rooms_with_capacity(h1, 'E', [0, 1, 2, 3], 15, 3, "triple")
+        # Floor 4: Single rooms
+        create_rooms_with_capacity(h1, 'A', [4], 15, 1, "single")
+        create_rooms_with_capacity(h1, 'B', [4], 15, 1, "single")
         
     # BH2: Mixed use
-    # A, B Wings: Single seater for 4th year (10 rooms per floor, 3 floors = 30 beds per wing)
-    # C, D Wings: Double sharing for 3rd year (10 rooms per floor, 10 floors = 200 beds per wing)
+    # C, D Wings: Double sharing for 3rd year (Increased to 15 floors = 300 beds per wing)
     h2 = create_hostel("BH2", "male")
     if h2:
         hostel_ids['BH2'] = h2
-        # Single seater for 4th year
-        create_rooms_with_capacity(h2, 'A', 3, 10, 1, "single")
-        create_rooms_with_capacity(h2, 'B', 3, 10, 1, "single")
-        # Double sharing for 3rd year - increased floors to 10 for 200 beds per wing
-        create_rooms_with_capacity(h2, 'C', 10, 10, 2, "double")
-        create_rooms_with_capacity(h2, 'D', 10, 10, 2, "double")
+        create_rooms_with_capacity(h2, 'A', 5, 10, 1, "single")
+        create_rooms_with_capacity(h2, 'B', 5, 10, 1, "single")
+        create_rooms_with_capacity(h2, 'C', 15, 10, 2, "double")
+        create_rooms_with_capacity(h2, 'D', 15, 10, 2, "double")
         
-    # BH3: 8 floors (G-7). Double seater completely.
+    # BH3: 12 floors. Double seater completely.
     h3 = create_hostel("BH3", "male")
     if h3:
         hostel_ids['BH3'] = h3
-        create_rooms_with_capacity(h3, 'A', 8, 10, 2, "double")
-        create_rooms_with_capacity(h3, 'B', 8, 10, 2, "double")
+        create_rooms_with_capacity(h3, 'A', 12, 10, 2, "double")
+        create_rooms_with_capacity(h3, 'B', 12, 10, 2, "double")
         
-    # BH4: 7 floors (G-6). 2nd year only.
+    # BH4: 10 floors. 2nd year only.
     h4 = create_hostel("BH4", "male")
     if h4:
         hostel_ids['BH4'] = h4
-        create_rooms_with_capacity(h4, 'A', 7, 10, 2, "double")
-        create_rooms_with_capacity(h4, 'B', 7, 10, 2, "double")
+        create_rooms_with_capacity(h4, 'A', 10, 10, 2, "double")
+        create_rooms_with_capacity(h4, 'B', 10, 10, 2, "double")
         
     g1 = create_hostel("GH1", "female")
     if g1:
         hostel_ids['GH1'] = g1
-        # Increased capacity to accommodate ~240 female students
-        create_rooms_with_capacity(g1, 'A', 6, 10, 2, "double")
-        create_rooms_with_capacity(g1, 'B', 6, 10, 2, "double")
+        # Increased capacity to 400 beds
+        create_rooms_with_capacity(g1, 'A', 10, 10, 2, "double")
+        create_rooms_with_capacity(g1, 'B', 10, 10, 2, "double")
         
     return hostel_ids
 
