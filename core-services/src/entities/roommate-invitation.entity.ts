@@ -28,7 +28,7 @@ export class RoommateInvitation {
   @Column()
   receiverId: string;
 
-  @Column()
+  @Column({ nullable: true })
   groupId: number;
 
   @Column({
@@ -52,7 +52,7 @@ export class RoommateInvitation {
   @JoinColumn({ name: 'receiverId', referencedColumnName: 'userId' })
   receiver: Student;
 
-  @ManyToOne(() => Group)
+  @ManyToOne(() => Group, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'groupId' })
   group: Group;
 }

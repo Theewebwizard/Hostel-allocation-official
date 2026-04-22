@@ -580,7 +580,7 @@ export default function AdminPage() {
   };
 
   const handleRollback = async () => {
-    if (revertConfirmText !== "REVERT") {
+    if (revertConfirmText.toUpperCase() !== "REVERT") {
       setError("Please type 'REVERT' to confirm the rollback.");
       return;
     }
@@ -3065,7 +3065,7 @@ export default function AdminPage() {
               </Button>
               <Button
                 className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold"
-                disabled={revertConfirmText !== "REVERT" || isReverting}
+                disabled={revertConfirmText.toUpperCase() !== "REVERT" || isReverting}
                 onClick={handleRollback}
               >
                 {isReverting ? (

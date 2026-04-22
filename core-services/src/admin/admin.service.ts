@@ -794,12 +794,20 @@ export class AdminService {
       }
 
       // Step D: Log the action for Undo
-      const snapshot: Record<string, { roomId: number | null; applicationStatus: string; hasSubmitted: boolean }> = {};
+      const snapshot: Record<string, { 
+        roomId: number | null; 
+        applicationStatus: string; 
+        hasSubmitted: boolean;
+        allocationResult?: any;
+      }> = {};
+
       for (const s of students) {
+        const result = results.find((r) => r.studentId === s.userId);
         snapshot[s.userId] = {
           roomId: s.currentRoomId,
           applicationStatus: s.applicationStatus,
           hasSubmitted: s.hasSubmitted,
+          allocationResult: result || null,
         };
       }
 
@@ -850,7 +858,12 @@ export class AdminService {
       if (!action) throw new NotFoundException('Action log not found');
       if (action.isReverted) throw new BadRequestException('Action already reverted');
 
-      const snapshot = action.snapshot as Record<string, { roomId: number | null; applicationStatus: string; hasSubmitted: boolean }>;
+      const snapshot = action.snapshot as Record<string, { 
+        roomId: number | null; 
+        applicationStatus: string; 
+        hasSubmitted: boolean; 
+        allocationResult?: any 
+      }>;
       const studentIds = Object.keys(snapshot);
 
       // 1. Identify all rooms that will be involved
@@ -865,7 +878,7 @@ export class AdminService {
         .map(v => v.roomId)
         .filter(id => id !== null) as number[];
 
-      // 2. Restore students
+      // 2. Restore students and allocation results
       for (const studentId of studentIds) {
         const previousState = snapshot[studentId];
         await manager.update(Student, { userId: studentId }, {
@@ -874,6 +887,18 @@ export class AdminService {
           applicationStatus: previousState.applicationStatus,
           hasSubmitted: previousState.hasSubmitted, 
         });
+
+        // Restore AllocationResult if it was part of an eviction
+        if (action.actionType === ActionType.EVICTION && previousState.allocationResult) {
+          const resultData = previousState.allocationResult;
+          // Create a new entity from the saved data
+          const restoredResult = manager.create(AllocationResult, {
+            ...resultData,
+            // Ensure we don't accidentally link to a non-existent group if it was disbanded
+            // though SET NULL should have handled this in the snapshot already
+          });
+          await manager.save(AllocationResult, restoredResult);
+        }
       }
 
       // 3. Reset room statuses

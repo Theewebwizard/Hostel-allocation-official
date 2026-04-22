@@ -70,7 +70,7 @@ class RoommateInvitation(BaseModel):
     id: int
     sender_id: str
     receiver_id: str
-    group_id: int
+    group_id: Optional[int] = None
     status: str = "accepted"
 
 

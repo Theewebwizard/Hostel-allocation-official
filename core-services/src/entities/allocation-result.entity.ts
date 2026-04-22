@@ -59,7 +59,7 @@ export class AllocationResult {
   @JoinColumn({ name: 'roomId' })
   room: Room;
 
-  @ManyToOne(() => Group, { nullable: true })
+  @ManyToOne(() => Group, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'groupId' })
   group: Group;
 }
