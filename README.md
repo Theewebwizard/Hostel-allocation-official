@@ -613,6 +613,7 @@ POST /admin/rules/matrix
 - RabbitMQ integration
 - Redis caching
 - Drag-and-drop override UI
+- Add a feature to allow warden to decide to show the students, what hsotels they're eligible for and then to show them max roomate they can have which will applied hostel wise.
 
 ### Not Started
 
