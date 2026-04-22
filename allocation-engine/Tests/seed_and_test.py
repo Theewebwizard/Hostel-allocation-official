@@ -123,27 +123,33 @@ def setup_hostels():
     print("\n🏗️ Building Hostels and Rooms...")
     hostel_ids = {}
     
-    # BH1: G,1,2,3 floors. Only E wing at G,1,2. All wings at 3.
+    # BH1: Senior/Junior mixed
     h1 = create_hostel("BH1", "male")
     if h1:
         hostel_ids['BH1'] = h1
-        # Floors G, 1, 2: Only E (Triple)
+        # Floors G, 1, 2: Wings C, D, E for Year 1 (30 rooms * 3 wings * 3 beds = 270 beds)
+        create_rooms_with_capacity(h1, 'C', [0, 1, 2], 10, 3, "triple")
+        create_rooms_with_capacity(h1, 'D', [0, 1, 2], 10, 3, "triple")
         create_rooms_with_capacity(h1, 'E', [0, 1, 2], 10, 3, "triple")
-        # Floor 3: All wings
+        # Floor 3: All wings (mostly Year 4)
         create_rooms_with_capacity(h1, 'A', [3], 10, 1, "single")
         create_rooms_with_capacity(h1, 'B', [3], 10, 1, "single")
         create_rooms_with_capacity(h1, 'C', [3], 10, 3, "triple")
         create_rooms_with_capacity(h1, 'D', [3], 10, 3, "triple")
         create_rooms_with_capacity(h1, 'E', [3], 10, 3, "triple")
         
-    # BH2: G,1,2 floors (3 floors). A,B (Single), C,D (Double).
+    # BH2: Mixed use
+    # A, B Wings: Single seater for 4th year (10 rooms per floor, 3 floors = 30 beds per wing)
+    # C, D Wings: Double sharing for 3rd year (10 rooms per floor, 10 floors = 200 beds per wing)
     h2 = create_hostel("BH2", "male")
     if h2:
         hostel_ids['BH2'] = h2
+        # Single seater for 4th year
         create_rooms_with_capacity(h2, 'A', 3, 10, 1, "single")
         create_rooms_with_capacity(h2, 'B', 3, 10, 1, "single")
-        create_rooms_with_capacity(h2, 'C', 3, 10, 2, "double")
-        create_rooms_with_capacity(h2, 'D', 3, 10, 2, "double")
+        # Double sharing for 3rd year - increased floors to 10 for 200 beds per wing
+        create_rooms_with_capacity(h2, 'C', 10, 10, 2, "double")
+        create_rooms_with_capacity(h2, 'D', 10, 10, 2, "double")
         
     # BH3: 8 floors (G-7). Double seater completely.
     h3 = create_hostel("BH3", "male")
@@ -162,7 +168,9 @@ def setup_hostels():
     g1 = create_hostel("GH1", "female")
     if g1:
         hostel_ids['GH1'] = g1
-        create_rooms_with_capacity(g1, 'A', 2, 10, 2, "double")
+        # Increased capacity to accommodate ~240 female students
+        create_rooms_with_capacity(g1, 'A', 6, 10, 2, "double")
+        create_rooms_with_capacity(g1, 'B', 6, 10, 2, "double")
         
     return hostel_ids
 
@@ -226,8 +234,10 @@ def create_allocation_rules():
 
     # BH2: Year 4 (Wings A, B). Year 3 (Wings C, D).
     if 'BH2' in hm:
+        # 4th Year rules for A, B (Single rooms)
         set_rule(hm['BH2'], 4, True, wing="A")
         set_rule(hm['BH2'], 4, True, wing="B")
+        # 3rd Year rules for C, D (Double rooms)
         set_rule(hm['BH2'], 3, True, wing="C")
         set_rule(hm['BH2'], 3, True, wing="D")
 
@@ -256,20 +266,25 @@ def create_allocation_rules():
 def generate_students_and_groups(mode="group_based"):
     print(f"\n🎓 Generating Students & Groups (Exactly 240) for mode: {mode}...")
     GROUP_CONFIGS = [
-        # Year 1 (BH1 C,D,E): 90 students
-        {"year": 1, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 90}, 
-        # Year 2 (BH4): 140 students
-        {"year": 2, "gender": "male", "sizes": [1, 2], "distribution": [0.3, 0.7], "count": 80}, # ~140 students
-        # Year 3 (BH2 C,D): 60 students
-        {"year": 3, "gender": "male", "sizes": [1, 2], "distribution": [0.3, 0.7], "count": 35}, # ~60 students
-        # Year 4 (BH1 A,B + BH2 A,B): 10 + 30 = 40 students
-        {"year": 4, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 40},
-        # BH3 Shared (160 beds): Let's add 160 more students across years
-        {"year": 1, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 80}, 
-        {"year": 3, "gender": "male", "sizes": [2], "distribution": [1.0], "count": 40}, # 80 students
-        # Female Students (GH1): 20 beds
-        {"year": 1, "gender": "female", "sizes": [1], "distribution": [1.0], "count": 10}, 
-        {"year": 4, "gender": "female", "sizes": [1], "distribution": [1.0], "count": 10}, 
+        # Year 1 (BH1 C,D,E - 180 beds): 150 students - mostly individuals
+        {"year": 1, "gender": "male", "sizes": [1], "distribution": [1.0], "count": 150}, 
+        
+        # Year 2 (BH4 - 280 beds): 220 students - Large groups up to 10 (Whole Wing)
+        {"year": 2, "gender": "male", "sizes": [1, 2, 4, 10], "distribution": [0.2, 0.2, 0.3, 0.3], "count": 50}, # ~250 students
+        
+        # Year 3 (BH2 C,D - 400 beds): 350 students - Huge groups up to 20
+        {"year": 3, "gender": "male", "sizes": [2, 4, 10, 20], "distribution": [0.1, 0.2, 0.4, 0.3], "count": 40}, # ~350 students
+        
+        # Year 4 (BH1 A,B & BH2 A,B - 80 beds): 70 students - Mix of individuals and pairs
+        {"year": 4, "gender": "male", "sizes": [1, 2], "distribution": [0.7, 0.3], "count": 50}, # ~65 students
+        
+        # BH3 Shared (320 beds overflow): 100 students across years
+        {"year": 2, "gender": "male", "sizes": [2, 4, 8], "distribution": [0.3, 0.4, 0.3], "count": 20}, # ~90 students
+        {"year": 3, "gender": "male", "sizes": [1, 3], "distribution": [0.4, 0.6], "count": 20}, # 40 students
+        
+        # Female Students (GH1 - 80 beds): 60 students
+        {"year": 1, "gender": "female", "sizes": [1], "distribution": [1.0], "count": 20}, 
+        {"year": 2, "gender": "female", "sizes": [2, 4, 6], "distribution": [0.4, 0.3, 0.3], "count": 15}, # ~55 students
     ]
 
     uid = str(uuid.uuid4())[:4]
@@ -301,19 +316,26 @@ def generate_students_and_groups(mode="group_based"):
                     token = res.json().get('accessToken')
                     student_tokens[email] = {'token': token, 'rollNumber': roll}
                     
-                    # Automatically apply so they have an applicationTimestamp
-                    s_session = requests.Session()
-                    s_session.headers.update({"Authorization": f"Bearer {token}"})
-                    s_session.post(f"{NEST_API}/students/me/apply")
-                    
                     info = {'email': email, 'rollNumber': roll, 'group_id': f"{cfg['gender']}_{cfg['year']}_c{c_idx}_{g_idx}_{uid}"}
                     grp_students.append(info)
                 else:
-                    # 👈 CRITICAL FIX: Print the exact error if NestJS rejects it!
                     print(f"   ❌ Failed to register {email}: Status {res.status_code} | Error: {res.text}")
 
             if grp_students:
                 groups_data.append({'group_id': info['group_id'], 'students': grp_students, 'size': size})
+
+    # Shuffle all students to randomize application order
+    all_student_emails = list(student_tokens.keys())
+    random.shuffle(all_student_emails)
+    
+    print(f"📤 Submitting applications for {len(all_student_emails)} students in random order...")
+    for email in all_student_emails:
+        token = student_tokens[email]['token']
+        s_session = requests.Session()
+        s_session.headers.update({"Authorization": f"Bearer {token}"})
+        s_session.post(f"{NEST_API}/students/me/apply")
+        # Add a tiny random delay to ensure unique timestamps
+        time.sleep(0.01)
 
     if mode == "fcfs":
         print("ℹ️ FCFS mode: Skipping group formation and roommate invitations.")
@@ -349,14 +371,15 @@ def generate_students_and_groups(mode="group_based"):
     for g in groups_data:
         if g["size"] < 2:
             continue
-        # Only create roommate preferences for 50% of multi-person groups
-        if random.random() > 0.5:
-            continue
-
-        # Pick two students from the group to be roommates
+        
+        # Determine how many pairs to create based on size
+        # Size 2 -> 1 pair, Size 4 -> 2 pairs, Size 6 -> 3 pairs
+        num_pairs = g["size"] // 2
         members = g["students"]
-        if len(members) >= 2:
-            s1, s2 = members[0], members[1]
+        
+        for i in range(num_pairs):
+            s1 = members[i * 2]
+            s2 = members[i * 2 + 1]
 
             s1_session = requests.Session()
             s1_session.headers.update(

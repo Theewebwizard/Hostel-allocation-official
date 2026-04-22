@@ -2231,69 +2231,69 @@ export default function AdminPage() {
                   <CardContent className="p-0">
                     {/* Happiness Summary Grid */}
                     <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-2 md:grid-cols-5 gap-4">
-                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm transition-all hover:border-green-300">
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className="text-xs font-bold text-green-700">100%</span>
                           <Info 
                             className="w-3.5 h-3.5 text-slate-400 cursor-help" 
                             data-tooltip-id="h-100"
-                            data-tooltip-content="Perfect Match: All group members allocated to the same wing and floor."
+                            data-tooltip-content="Kept Together: All group members and roommate pairs are in the same room/wing/floor as requested."
                           />
                         </div>
                         <span className="text-2xl font-bold text-slate-900">{happinessStats[100]}</span>
-                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Perfect</span>
+                        <span className="text-[10px] text-green-600 uppercase font-bold tracking-wider">Kept Together</span>
                       </div>
 
-                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm transition-all hover:border-blue-300">
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className="text-xs font-bold text-blue-700">60%</span>
                           <Info 
                             className="w-3.5 h-3.5 text-slate-400 cursor-help" 
                             data-tooltip-id="h-60"
-                            data-tooltip-content="Same Wing, Different Floor: Group members are in the same physical wing but split across floors."
+                            data-tooltip-content="Floor Split: Group members are in the same wing but separated by floors. (Reduced happiness)"
                           />
                         </div>
                         <span className="text-2xl font-bold text-slate-900">{happinessStats[60]}</span>
-                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Wing Match</span>
+                        <span className="text-[10px] text-blue-600 uppercase font-bold tracking-wider">Floor Split</span>
                       </div>
 
-                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm transition-all hover:border-indigo-300">
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className="text-xs font-bold text-indigo-700">50%</span>
                           <Info 
                             className="w-3.5 h-3.5 text-slate-400 cursor-help" 
                             data-tooltip-id="h-50"
-                            data-tooltip-content="Individual Allocation / Same Hostel: Standard individual placement or group split across different wings."
+                            data-tooltip-content="Neutral Individual: Student applied individually (no roommates) or was split from group across wings."
                           />
                         </div>
                         <span className="text-2xl font-bold text-slate-900">{happinessStats[50]}</span>
-                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Standard</span>
+                        <span className="text-[10px] text-indigo-600 uppercase font-bold tracking-wider">Individual</span>
                       </div>
 
-                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm transition-all hover:border-amber-300">
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className="text-xs font-bold text-amber-700">30%</span>
                           <Info 
                             className="w-3.5 h-3.5 text-slate-400 cursor-help" 
                             data-tooltip-id="h-30"
-                            data-tooltip-content="Completely Separated: Group members were allocated to different hostels or completely different buildings."
+                            data-tooltip-content="Hostel Split: Group members are in the same hostel but completely different wings."
                           />
                         </div>
                         <span className="text-2xl font-bold text-slate-900">{happinessStats[30]}</span>
-                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Separated</span>
+                        <span className="text-[10px] text-amber-600 uppercase font-bold tracking-wider">Wing Split</span>
                       </div>
 
-                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                      <div className="flex flex-col items-center p-2 bg-white rounded-lg border border-slate-200 shadow-sm transition-all hover:border-red-300">
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className="text-xs font-bold text-red-700">0%</span>
                           <Info 
                             className="w-3.5 h-3.5 text-slate-400 cursor-help" 
                             data-tooltip-id="h-0"
-                            data-tooltip-content="Not Allocated: Students who could not be placed in any room due to constraints or lack of capacity."
+                            data-tooltip-content="Unallocated: Could not find any room matching rules for this student."
                           />
                         </div>
                         <span className="text-2xl font-bold text-slate-900">{happinessStats[0]}</span>
-                        <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Unallocated</span>
+                        <span className="text-[10px] text-red-600 uppercase font-bold tracking-wider">Failed</span>
                       </div>
                     </div>
 

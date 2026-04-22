@@ -9,6 +9,7 @@ import {
 export enum ActionType {
   EVICTION = 'EVICTION',
   ALLOCATION = 'ALLOCATION',
+  PUBLISH_RUN = 'PUBLISH_RUN',
 }
 
 @Entity('administrative_actions')
@@ -32,12 +33,10 @@ export class AdministrativeAction {
   timestamp: Date;
 
   @Column({ type: 'jsonb' })
-  snapshot: {
-    [studentId: string]: {
-      roomId: number | null;
-      applicationStatus: string;
-    };
-  };
+  snapshot: Record<string, any>;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata: Record<string, any>;
 
   @Column({ default: false })
   isReverted: boolean;

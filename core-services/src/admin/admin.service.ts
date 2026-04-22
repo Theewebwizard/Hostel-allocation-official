@@ -585,6 +585,24 @@ export class AdminService {
       if (run.finalized) {
         throw new BadRequestException('Allocation run is already published');
       }
+
+      // [CRITICAL] Capture PRE-COMMIT Snapshot for Undo
+      // We must do this BEFORE any updates (reset, finalized, etc.)
+      const studentEntitiesInCohort = await manager.find(Student, {
+        where: run.targetYears && run.targetYears.length > 0 
+          ? { year: In(run.targetYears) } 
+          : {}
+      });
+      
+      const snapshot: Record<string, { roomId: number | null; applicationStatus: string; hasSubmitted: boolean }> = {};
+      for (const s of studentEntitiesInCohort) {
+        snapshot[s.userId] = {
+          roomId: s.currentRoomId,
+          applicationStatus: s.applicationStatus,
+          hasSubmitted: s.hasSubmitted,
+        };
+      }
+
       run.finalized = true;
       await manager.save(AllocationRun, run);
 
@@ -595,6 +613,15 @@ export class AdminService {
       const successfulResults = results.filter((r) => r.roomId != null);
 
       if (successfulResults.length === 0) {
+        // Log the action even if empty for consistency
+        const actionLog = this.actionRepository.create({
+          actionType: ActionType.PUBLISH_RUN,
+          performedBy: 'WARDEN_ADMIN',
+          description: `Allocation Run Committed (0 students)`,
+          snapshot: snapshot as any,
+          metadata: { runId: id },
+        });
+        await manager.save(AdministrativeAction, actionLog);
         return { message: 'Run published, but no assignments were found to commit.', count: 0 };
       }
 
@@ -663,51 +690,13 @@ export class AdminService {
 
       await resetQuery.execute();
 
-      // Step E.2: Delete Groups for the targeted cohort
-      // We disband any group that has members from the years we just processed
-      const cohortStudentEntities = await manager.find(Student, {
-        where: run.targetYears && run.targetYears.length > 0 
-          ? { year: In(run.targetYears) } 
-          : {}
-      });
-      const cohortStudentIds = cohortStudentEntities.map(s => s.userId);
-
-      if (cohortStudentIds.length > 0) {
-        const memberships = await manager.find(GroupMembership, {
-          where: { userId: In(cohortStudentIds) },
-          select: ['groupId'],
-        });
-        
-        const groupIdsToDelete = [...new Set(memberships.map(m => m.groupId))];
-        
-        if (groupIdsToDelete.length > 0) {
-          await manager.delete(Group, groupIdsToDelete);
-          console.log(`[PublishCommit] Disbanded ${groupIdsToDelete.length} groups for target years: ${run.targetYears?.join(', ')}`);
-        }
-      }
-
-      // Capture Pre-Commit Snapshot for Undo
-      const studentEntitiesInCohort = await manager.find(Student, {
-        where: run.targetYears && run.targetYears.length > 0 
-          ? { year: In(run.targetYears) } 
-          : {}
-      });
-      
-      const snapshot: Record<string, { roomId: number | null; applicationStatus: string; hasSubmitted: boolean }> = {};
-      for (const s of studentEntitiesInCohort) {
-        snapshot[s.userId] = {
-          roomId: s.currentRoomId,
-          applicationStatus: s.applicationStatus,
-          hasSubmitted: s.hasSubmitted,
-        };
-      }
-
       // Step F: Log the action
       const actionLog = this.actionRepository.create({
-        actionType: ActionType.ALLOCATION,
+        actionType: ActionType.PUBLISH_RUN,
         performedBy: 'WARDEN_ADMIN',
         description: `Allocation Run Committed (${successfulResults.length} students)`,
-        snapshot: snapshot,
+        snapshot: snapshot as any,
+        metadata: { runId: id },
       });
       await manager.save(AdministrativeAction, actionLog);
 
@@ -815,7 +804,7 @@ export class AdminService {
         actionType: ActionType.EVICTION,
         performedBy: 'WARDEN_ADMIN',
         description: `Bulk Eviction of ${students.length} students`,
-        snapshot: snapshot,
+        snapshot: snapshot as any,
       });
       await manager.save(AdministrativeAction, actionLog);
 
@@ -840,8 +829,27 @@ export class AdminService {
     }
 
     await updateQuery.execute();
+
+    // Also disband groups for this cohort to maintain data hygiene
+    const students = await this.studentRepository.find({
+      where: year ? { year } : {},
+      select: ['userId'],
+    });
+    const studentIds = students.map((s) => s.userId);
+
+    if (studentIds.length > 0) {
+      const memberships = await this.membershipRepository.find({
+        where: { userId: In(studentIds) },
+        select: ['groupId'],
+      });
+      const groupIds = [...new Set(memberships.map((m) => m.groupId))];
+      if (groupIds.length > 0) {
+        await this.groupRepository.delete(groupIds);
+      }
+    }
+
     return {
-      message: `Application status reset successfully for ${year ? `Year ${year}` : 'all students'}.`,
+      message: `Application status reset and groups disbanded successfully for ${year ? `Year ${year}` : 'all students'}.`,
     };
   }
 
@@ -854,16 +862,11 @@ export class AdminService {
 
   async rollbackAction(actionId: string) {
     return await this.dataSource.transaction(async (manager) => {
-      const action = await manager.findOne(AdministrativeAction, { where: { id: actionId } });
+      const action = await manager.findOneBy(AdministrativeAction, { id: actionId });
       if (!action) throw new NotFoundException('Action log not found');
       if (action.isReverted) throw new BadRequestException('Action already reverted');
 
-      const snapshot = action.snapshot as Record<string, { 
-        roomId: number | null; 
-        applicationStatus: string; 
-        hasSubmitted: boolean; 
-        allocationResult?: any 
-      }>;
+      const snapshot = action.snapshot as Record<string, any>;
       const studentIds = Object.keys(snapshot);
 
       // 1. Identify all rooms that will be involved
@@ -909,7 +912,20 @@ export class AdminService {
         await manager.update(Room, { id: In(roomsToOccupy) }, { status: RoomStatus.OCCUPIED });
       }
 
-      // 4. Mark action as reverted
+      if (action.actionType === ActionType.PUBLISH_RUN && action.metadata?.runId) {
+        const runId = action.metadata.runId;
+        const run = await manager.findOne(AllocationRun, { where: { id: runId } });
+        if (run) {
+          run.finalized = false;
+          await manager.save(AllocationRun, run);
+
+          // Unlock results so they can be viewed/edited as draft again
+          await manager.update(AllocationResult, { runId }, { isLocked: false });
+          console.log(`[Rollback] Un-finalized run ${runId} and unlocked results`);
+        }
+      }
+
+      // 5. Mark action as reverted
       action.isReverted = true;
       await manager.save(AdministrativeAction, action);
 
