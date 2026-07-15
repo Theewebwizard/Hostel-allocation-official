@@ -47,6 +47,7 @@ export class AllocationDataService {
         'program',
         'applicationTimestamp',
         'currentRoomId',
+        'hostelPreferences',
       ],
     });
   }
@@ -62,6 +63,7 @@ export class AllocationDataService {
       id: group.id,
       name: group.name,
       creatorId: group.creatorId,
+      groupPreferences: group.groupPreferences,
       members: group.memberships
         .filter((m) => m.status === MembershipStatus.ACCEPTED && m.student.hasSubmitted === true)
         .map((m) => ({
@@ -73,6 +75,7 @@ export class AllocationDataService {
           program: m.student.program,
           applicationTimestamp: m.student.applicationTimestamp,
           currentRoomId: m.student.currentRoomId,
+          hostelPreferences: m.student.hostelPreferences,
         })),
     }));
   }

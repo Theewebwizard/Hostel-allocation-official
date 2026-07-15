@@ -24,6 +24,9 @@ export class Group {
   @CreateDateColumn()
   createdAt: Date;
 
+  @Column('int', { array: true, default: [] })
+  groupPreferences: number[];
+
   @ManyToOne(() => User)
   @JoinColumn({ name: 'creatorId' })
   creator: User;

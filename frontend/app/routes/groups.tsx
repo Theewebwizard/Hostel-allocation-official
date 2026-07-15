@@ -13,7 +13,25 @@ import {
   UserCheck,
   AlertCircle,
   RefreshCw,
+  Building2,
+  GripVertical,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Button,
   Input,
@@ -35,6 +53,28 @@ import {
   type RoommateInvitation,
   studentsApi,
 } from "~/lib/api";
+
+function SortableHostelItem({ id, hostel, eligibility }: { id: number, hostel: any, eligibility: any }) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="p-3 bg-white rounded-lg border border-indigo-100 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow relative bg-white z-10">
+      <div {...attributes} {...listeners} className="cursor-grab touch-none p-1.5 -ml-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600">
+        <GripVertical className="w-4 h-4" />
+      </div>
+      <div className="flex-1">
+        <div className="flex items-center gap-2 mb-1">
+          <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+          <p className="font-bold text-sm text-slate-900">{hostel.name}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function meta() {
   return [
@@ -71,6 +111,25 @@ export default function GroupsPage() {
   const [isSendingRoommateInvite, setIsSendingRoommateInvite] = useState(false);
   const [selectedRoommateId, setSelectedRoommateId] = useState<string>("");
   const [eligibility, setEligibility] = useState<any>(null);
+  const [groupPreferences, setGroupPreferences] = useState<number[]>([]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setGroupPreferences((items) => {
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
 
   useEffect(() => {
     checkAuth();
@@ -105,6 +164,9 @@ export default function GroupsPage() {
       setRoommateInvitations(rmInvRes.data);
       setAllocationPolicy(policyRes.data.policy);
       setEligibility(eligibilityRes.data);
+      if (eligibilityRes.data?.hostels) {
+        setGroupPreferences(eligibilityRes.data.hostels.map((h: any) => h.id));
+      }
     } catch (err) {
       console.error("Error loading data:", err);
     } finally {
@@ -121,7 +183,7 @@ export default function GroupsPage() {
     setSuccess("");
 
     try {
-      await groupsApi.createGroup(newGroupName);
+      await groupsApi.createGroup(newGroupName, groupPreferences);
       setSuccess("Group created successfully!");
       setNewGroupName("");
       loadData();
@@ -652,20 +714,42 @@ export default function GroupsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleCreateGroup} className="flex gap-2">
-                <div className="flex-1 relative">
-                  <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <Input
-                    type="text"
-                    placeholder="Enter group name"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    className="pl-10"
-                  />
+              <form onSubmit={handleCreateGroup} className="flex flex-col gap-4">
+                <div className="flex gap-2">
+                  <div className="flex-1 relative">
+                    <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <Input
+                      type="text"
+                      placeholder="Enter group name"
+                      value={newGroupName}
+                      onChange={(e) => setNewGroupName(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <Button type="submit" disabled={isCreating}>
+                    {isCreating ? "Creating..." : "Create Group"}
+                  </Button>
                 </div>
-                <Button type="submit" disabled={isCreating}>
-                  {isCreating ? "Creating..." : "Create Group"}
-                </Button>
+                
+                {eligibility?.hostels?.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-sm font-bold text-slate-700 mb-2">Rank Group Hostel Preferences</p>
+                    <p className="text-xs text-slate-500 mb-3">Drag and drop to rank hostels for your group.</p>
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                        <SortableContext items={groupPreferences} strategy={verticalListSortingStrategy}>
+                          <div className="flex flex-col gap-2">
+                            {groupPreferences.map((id) => {
+                              const hostel = eligibility.hostels.find((h: any) => h.id === id);
+                              if (!hostel) return null;
+                              return <SortableHostelItem key={id} id={id} hostel={hostel} eligibility={eligibility} />;
+                            })}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
+                    </div>
+                  </div>
+                )}
               </form>
             </CardContent>
           </Card>

@@ -105,7 +105,7 @@ export const studentsApi = {
     },
   ) => api.patch(`/students/${userId}`, data),
   getEligibleForSwap: () => api.get<Student[]>("/students/eligible-for-swap"),
-  submitApplication: () => api.post("/students/me/apply"),
+  submitApplication: (hostelPreferences?: number[]) => api.post("/students/me/apply", { hostelPreferences }),
   getMyEligibility: () => api.get<{
     enabled: boolean;
     showRoommateLimits: boolean;
@@ -157,7 +157,7 @@ export interface AdministrativeAction {
 }
 
 export const groupsApi = {
-  createGroup: (name: string) => api.post<Group>("/groups", { name }),
+  createGroup: (name: string, groupPreferences?: number[]) => api.post<Group>("/groups", { name, groupPreferences }),
   getMyGroup: () => api.get<Group | null>("/groups/me"),
   getGroupById: (id: number) => api.get<Group>(`/groups/${id}`),
   getAllGroups: () => api.get<Group[]>("/groups/all"),

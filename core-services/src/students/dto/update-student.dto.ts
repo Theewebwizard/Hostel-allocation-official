@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsEnum, IsArray, IsInt } from 'class-validator';
 import { StudentGender } from '../../entities';
 
 export class UpdateStudentDto {
@@ -27,4 +27,10 @@ export class UpdateStudentDto {
   @IsOptional()
   @IsEnum(StudentGender)
   gender?: StudentGender;
+
+  @ApiProperty({ example: [1, 2, 3], required: false })
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  hostelPreferences?: number[];
 }

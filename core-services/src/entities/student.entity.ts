@@ -45,6 +45,9 @@ export class Student {
   @Column({ default: 'NONE' })
   applicationStatus: string;
 
+  @Column('int', { array: true, default: [] })
+  hostelPreferences: number[];
+
   // Room assigned during initial allocation
   @Column({ nullable: true })
   allocatedRoomId: number | null;

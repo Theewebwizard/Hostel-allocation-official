@@ -29,6 +29,8 @@ class Student(BaseModel):
     program: Optional[str] = None
     application_timestamp: Optional[str] = None  # ISO format timestamp
     current_room_id: Optional[int] = None
+    hostel_preferences: List[int] = []
+
 
 
 class Group(BaseModel):
@@ -36,6 +38,8 @@ class Group(BaseModel):
     name: str
     creator_id: str
     members: List[Student]
+    group_preferences: List[int] = []
+
 
 
 class Hostel(BaseModel):

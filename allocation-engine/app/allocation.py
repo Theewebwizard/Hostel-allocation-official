@@ -316,7 +316,8 @@ class AllocationEngine:
     def _find_best_wing_for_group(
         self,
         group_members: List[Student],
-        state: AllocationState
+        state: AllocationState,
+        group: Optional[Group] = None
     ) -> Optional[str]:
         """
         Stage 2: Find the best wing to place a group
@@ -372,8 +373,12 @@ class AllocationEngine:
                         if rule.priority > rule_priority:
                             rule_priority = rule.priority
             
-            # Sort by fit_penalty (compatible rooms first), then rule priority, then capacity
-            return (fit_penalty, -rule_priority, -cap, wing_k)
+            # Calculate group preference index
+            group_prefs = getattr(group, 'group_preferences', []) if group else []
+            pref_idx = group_prefs.index(wing.hostel_id) if wing.hostel_id in group_prefs else len(group_prefs)
+
+            # Sort by fit_penalty (compatible rooms first), then rule priority, then group preference, then capacity
+            return (fit_penalty, -rule_priority, pref_idx, -cap, wing_k)
 
         available_wings.sort(key=wing_sort_key)
         
@@ -582,9 +587,22 @@ class AllocationEngine:
             student = unit[0]
             valid_rooms = self._get_valid_rooms_for_student(student)
 
-            # Sort: 1. Rule Priority (high first), 2. Occupancy (high first for consolidation)
+            # Helper for preference index
+            def get_pref_idx(r):
+                prefs = getattr(student, 'hostel_preferences', [])
+                try:
+                    return prefs.index(r.hostel_id)
+                except ValueError:
+                    return len(prefs)
+
+            # Sort: 1. Rule Priority (high first), 2. User Preference (low first), 3. Occupancy (high first for consolidation)
             valid_rooms.sort(
-                key=lambda r: (-getattr(r, 'match_priority', 0), -len(state.room_assignments.get(r.id, [])), r.id)
+                key=lambda r: (
+                    -getattr(r, 'match_priority', 0),
+                    get_pref_idx(r),
+                    -len(state.room_assignments.get(r.id, [])),
+                    r.id
+                )
             )
 
             for room in valid_rooms:
@@ -706,7 +724,7 @@ class AllocationEngine:
                 continue
 
             # Try to find a single physical wing that can accommodate all members
-            best_wing = self._find_best_wing_for_group(unallocated_members, state)
+            best_wing = self._find_best_wing_for_group(unallocated_members, state, group=wing_group)
 
             if best_wing:
                 # Entire wing fits in one physical wing - allocate together
@@ -772,7 +790,7 @@ class AllocationEngine:
             if not unallocated_members:
                 continue
 
-            best_wing = self._find_best_wing_for_group(unallocated_members, state)
+            best_wing = self._find_best_wing_for_group(unallocated_members, state, group=group)
 
             if best_wing:
                 # Whole group fits in one wing

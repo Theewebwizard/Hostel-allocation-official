@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsEnum, IsArray, IsInt } from 'class-validator';
 import { MembershipStatus } from '../../entities';
 
 export class CreateGroupDto {
@@ -7,6 +7,12 @@ export class CreateGroupDto {
   @IsNotEmpty()
   @IsString()
   name: string;
+
+  @ApiProperty({ example: [1, 2, 3], required: false })
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  groupPreferences?: number[];
 }
 
 export class InviteMemberDto {

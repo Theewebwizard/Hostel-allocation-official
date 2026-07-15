@@ -12,7 +12,24 @@ import {
   CheckCircle,
   XCircle,
   Info,
+  GripVertical,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { DashboardLayout } from "~/components/layout/DashboardLayout";
 import {
   Button,
@@ -59,6 +76,49 @@ function StatCard({
   );
 }
 
+function SortableHostelItem({ id, hostel, eligibility }: { id: number, hostel: any, eligibility: any }) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 bg-white rounded-xl border border-indigo-100 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow relative bg-white z-10">
+      <div {...attributes} {...listeners} className="cursor-grab touch-none p-2 -ml-2 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600">
+        <GripVertical className="w-5 h-5" />
+      </div>
+      <div className="flex-1">
+        <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100">
+          <Building2 className="w-4 h-4 text-indigo-500" />
+          <p className="font-bold text-slate-900">{hostel.name}</p>
+        </div>
+        <div className="space-y-1">
+          {hostel.wings.map((wing: any) => (
+            <div key={wing.name} className="flex flex-col gap-1">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-600 font-medium">{wing.name} Wing</span>
+                <div className="flex items-center gap-2">
+                  {eligibility.showRoommateLimits && (
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold border border-indigo-100">
+                      MAX {wing.maxRoommates}
+                    </span>
+                  )}
+                  {eligibility.showBatchCapacity && (
+                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold border border-slate-200">
+                      {wing.totalSpots} SPOTS
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StudentDashboard() {
   const { user, checkAuth } = useAuthStore();
   const student = user?.student;
@@ -69,6 +129,25 @@ function StudentDashboard() {
   const [submitError, setSubmitError] = useState("");
   const [appsEnabled, setAppsEnabled] = useState(true);
   const [eligibility, setEligibility] = useState<any>(null);
+  const [preferences, setPreferences] = useState<number[]>([]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setPreferences((items) => {
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
 
   const handleApply = async () => {
     if (
@@ -80,7 +159,7 @@ function StudentDashboard() {
     setIsSubmitting(true);
     setSubmitError("");
     try {
-      await studentsApi.submitApplication();
+      await studentsApi.submitApplication(preferences);
       await checkAuth(); // Refresh user data to get the new timestamp
     } catch (err: any) {
       setSubmitError(
@@ -114,6 +193,9 @@ function StudentDashboard() {
         }
         setAppsEnabled(statusRes.data.enabled ?? true);
         setEligibility(eligibilityRes.data);
+        if (eligibilityRes.data?.hostels) {
+          setPreferences(eligibilityRes.data.hostels.map((h: any) => h.id));
+        }
       } catch (err) {
         console.error("Failed to fetch dashboard data", err);
       }
@@ -282,39 +364,19 @@ function StudentDashboard() {
           </CardHeader>
           <CardContent className="p-6">
             <p className="text-sm text-slate-500 mb-4">
-              Based on your year and program, you are eligible to apply for the following hostels.
+              Drag and drop to rank your preferred hostels. Your preferences will be submitted in this exact order.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {eligibility.hostels.map((hostel: any) => (
-                <div key={hostel.id} className="p-4 bg-white rounded-xl border border-indigo-100 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100">
-                    <Building2 className="w-4 h-4 text-indigo-500" />
-                    <p className="font-bold text-slate-900">{hostel.name}</p>
-                  </div>
-                  <div className="space-y-2">
-                    {hostel.wings.map((wing: any) => (
-                      <div key={wing.name} className="flex flex-col gap-1">
-                        <div className="flex justify-between items-center text-sm">
-                          <span className="text-slate-600 font-medium">{wing.name} Wing</span>
-                          <div className="flex items-center gap-2">
-                            {eligibility.showRoommateLimits && (
-                              <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold border border-indigo-100">
-                                MAX {wing.maxRoommates} ROOMMATES
-                              </span>
-                            )}
-                            {eligibility.showBatchCapacity && (
-                              <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold border border-slate-200">
-                                {wing.totalSpots} TOTAL SPOTS
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={preferences} strategy={verticalListSortingStrategy}>
+                <div className="flex flex-col gap-3">
+                  {preferences.map((id) => {
+                    const hostel = eligibility.hostels.find((h: any) => h.id === id);
+                    if (!hostel) return null;
+                    return <SortableHostelItem key={id} id={id} hostel={hostel} eligibility={eligibility} />;
+                  })}
                 </div>
-              ))}
-            </div>
+              </SortableContext>
+            </DndContext>
           </CardContent>
         </Card>
       )}
