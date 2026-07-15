@@ -229,7 +229,7 @@ export default function AdminPage() {
 
   // Allocation mode
   const [allocationMode, setAllocationMode] = useState<
-    "group_based" | "fcfs" | "wing_fcfs"
+    "group_based" | "fcfs" | "wing_fcfs" | "global_optimization"
   >("group_based");
 
   // Run Configuration Modal
@@ -1842,7 +1842,7 @@ export default function AdminPage() {
                       value={allocationMode}
                       onChange={(e) =>
                         setAllocationMode(
-                          e.target.value as "group_based" | "fcfs",
+                          e.target.value as "group_based" | "fcfs" | "wing_fcfs" | "global_optimization",
                         )
                       }
                       className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1856,13 +1856,18 @@ export default function AdminPage() {
                       <option value="wing_fcfs">
                         Wing FCFS (Groups by Earliest Timestamp)
                       </option>
+                      <option value="global_optimization">
+                        Global Optimization (CP-SAT)
+                      </option>
                     </select>
                     <p className="text-sm text-gray-600 mt-2">
                       {allocationMode === "fcfs"
                         ? "⏱️ Students allocated strictly by application timestamp, ignoring groups."
                         : allocationMode === "wing_fcfs"
                           ? "🏠 Groups allocated in FCFS order by their earliest member timestamp. Members placed in the same physical wing when possible."
-                          : "👥 Groups optimized for proximity and cohesion. Students allocated together when possible."}
+                          : allocationMode === "global_optimization"
+                            ? "🧠 Solves a global mathematical matrix to maximize capacity and minimize unallocated students. Warning: Can take up to 60 seconds."
+                            : "👥 Groups optimized for proximity and cohesion. Students allocated together when possible."}
                     </p>
                   </div>
 

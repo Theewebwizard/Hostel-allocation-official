@@ -19,6 +19,7 @@ from typing import List, Dict, Set, Tuple, Optional
 from dataclasses import dataclass
 from collections import defaultdict
 from constraint import Problem, AllDifferentConstraint
+from ortools.sat.python import cp_model
 
 from .models import Student, Group, Room, Hostel, AllocationRule, AllocationResult, AllocationDecisionLog, RoommateInvitation
 from typing import Dict as TypingDict
@@ -657,6 +658,8 @@ class AllocationEngine:
             return self.run_fcfs_allocation()
         elif mode == "wing_fcfs":
             return self.run_wing_fcfs_allocation()
+        elif mode == "global_optimization":
+            return self.run_global_optimization_allocation()
         else:
             return self.run_group_based_allocation()
 
@@ -828,3 +831,159 @@ class AllocationEngine:
                 final_results[r.student_id] = r
                 
         return list(final_results.values())
+
+    def run_global_optimization_allocation(self) -> List[AllocationResult]:
+        """
+        Execute Global Optimization using Google OR-Tools CP-SAT Solver.
+        Maximizes global happiness based on administrative rule priorities and user preferences.
+        """
+        results: List[AllocationResult] = []
+        state = self._build_initial_state()
+        
+        model = cp_model.CpModel()
+        
+        # 1. Variable Definition
+        X = {}
+        valid_rooms_cache = {}
+        
+        # Dynamic Objective Scaling for Lexicographical Dominance
+        W_rule = 1000
+        W_pref = 10
+        
+        max_rule_priority = max([r.priority for r in self.rules]) if self.rules else 0
+        max_pref_length = max([len(getattr(s, 'hostel_preferences', [])) for s in self.students.values()]) if self.students else 0
+        
+        max_possible_bonus = (W_rule * max_rule_priority) + (W_pref * max_pref_length)
+        total_students = len(self.students)
+        W_base = (total_students * max_possible_bonus) + 1_000_000
+        
+        # Prune and Instantiate variables
+        for s_id, student in self.students.items():
+            if s_id in state.student_allocations:
+                continue # Already locked in
+                
+            valid_rooms = self._get_valid_rooms_for_student(student)
+            valid_rooms_cache[s_id] = valid_rooms
+            X[s_id] = {}
+            
+            for room in valid_rooms:
+                var = model.NewBoolVar(f'x_{s_id}_{room.id}')
+                X[s_id][room.id] = var
+
+        # 2. Hard Constraints
+        # A. Uniqueness: At most one room per student
+        for s_id, student_rooms in X.items():
+            model.AddAtMostOne(student_rooms.values())
+            
+        # B. Capacity
+        for room in self.rooms.values():
+            if room.status.value != "available":
+                continue
+                
+            current_occ = len(state.room_assignments.get(room.id, []))
+            available_cap = max(0, room.capacity - current_occ)
+                
+            room_vars = []
+            for s_id, student_rooms in X.items():
+                if room.id in student_rooms:
+                    room_vars.append(student_rooms[room.id])
+            
+            if room_vars:
+                model.Add(sum(room_vars) <= available_cap)
+                
+        # C. Atomic Units (Roommates)
+        mobile_students = [s for s in self.students.values() if s.user_id not in state.student_allocations]
+        units = self._get_atomic_units(mobile_students)
+        
+        for unit in units:
+            if len(unit) > 1:
+                # Group's valid rooms is the intersection of individual valid rooms
+                intersection_ids = set([r.id for r in valid_rooms_cache[unit[0].user_id]])
+                for s in unit[1:]:
+                    intersection_ids &= set([r.id for r in valid_rooms_cache[s.user_id]])
+                
+                # Enforce equality for shared valid rooms and force 0 for outside rooms
+                all_room_ids = set()
+                for s in unit:
+                    all_room_ids.update(X[s.user_id].keys())
+                    
+                for r_id in all_room_ids:
+                    if r_id in intersection_ids:
+                        first_var = X[unit[0].user_id][r_id]
+                        for s in unit[1:]:
+                            model.Add(X[s.user_id][r_id] == first_var)
+                    else:
+                        for s in unit:
+                            if r_id in X[s.user_id]:
+                                model.Add(X[s.user_id][r_id] == 0)
+
+        # 3. Soft Constraints / Objective Function
+        objective_terms = []
+        for s_id, student_rooms in X.items():
+            student = self.students[s_id]
+            prefs = getattr(student, 'hostel_preferences', [])
+            pref_length = len(prefs)
+            
+            for r_id, var in student_rooms.items():
+                room = self.rooms[r_id]
+                p_match = getattr(room, 'match_priority', 0)
+                
+                try:
+                    idx = prefs.index(room.hostel_id)
+                except ValueError:
+                    idx = pref_length
+                    
+                score = W_base + (W_rule * p_match) + (W_pref * (pref_length - idx))
+                objective_terms.append(score * var)
+                
+        model.Maximize(sum(objective_terms))
+        
+        # 4. Solver Execution
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = 60.0
+        
+        status = solver.Solve(model)
+        
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            for s_id, student_rooms in X.items():
+                allocated_r_id = None
+                for r_id, var in student_rooms.items():
+                    if solver.Value(var) == 1:
+                        allocated_r_id = r_id
+                        break
+                        
+                if allocated_r_id is not None:
+                    room = self.rooms[allocated_r_id]
+                    hostel = self.hostels.get(room.hostel_id)
+                    results.append(AllocationResult(
+                        student_id=s_id,
+                        room_id=room.id,
+                        hostel_name=hostel.name if hostel else "Unknown",
+                        room_number=room.room_number,
+                        wing=room.wing,
+                        floor=room.floor,
+                        group_id=None,
+                        happiness=100
+                    ))
+                else:
+                    results.append(AllocationResult(
+                        student_id=s_id,
+                        room_id=None,
+                        hostel_name="Unallocated",
+                        room_number="Pending",
+                        reason="No valid capacity or configuration found by solver",
+                        happiness=0
+                    ))
+        else:
+            # INFEASIBLE fallback
+            for s_id in X.keys():
+                results.append(AllocationResult(
+                    student_id=s_id,
+                    room_id=None,
+                    hostel_name="Unallocated",
+                    room_number="Pending",
+                    reason="Solver returned INFEASIBLE. Constraints conflict.",
+                    happiness=0
+                ))
+                
+        return results

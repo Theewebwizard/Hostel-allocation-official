@@ -19,6 +19,7 @@ export enum AllocationMode {
   GROUP_BASED = 'group_based',
   FCFS = 'fcfs',
   WING_FCFS = 'wing_fcfs',
+  GLOBAL_OPTIMIZATION = 'global_optimization',
 }
 
 @Entity('allocation_runs')

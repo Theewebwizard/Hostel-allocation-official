@@ -241,7 +241,7 @@ export class TriggerAllocationDto {
   @ApiPropertyOptional({
     example: 'group_based',
     enum: AllocationMode,
-    description: 'Allocation mode: group_based (default), fcfs, or wing_fcfs',
+    description: 'Allocation mode: group_based (default), fcfs, wing_fcfs, or global_optimization',
   })
   @IsOptional()
   @IsEnum(AllocationMode)
@@ -294,7 +294,7 @@ export class SetAllocationPolicyDto {
   @ApiProperty({
     example: 'group_based',
     enum: AllocationMode,
-    description: 'Global allocation policy: group_based, fcfs, or wing_fcfs',
+    description: 'Global allocation policy: group_based, fcfs, wing_fcfs, or global_optimization',
   })
   @IsNotEmpty()
   @IsEnum(AllocationMode)

@@ -318,7 +318,7 @@ export const adminApi = {
 
   // Allocation
   triggerAllocation: (data?: {
-    allocationMode?: "group_based" | "fcfs" | "wing_fcfs";
+    allocationMode?: "group_based" | "fcfs" | "wing_fcfs" | "global_optimization";
     targetYears?: number[];
     targetPrograms?: string[];
   }) => api.post<AllocationRun>("/admin/allocation/run", data || {}),
