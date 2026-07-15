@@ -267,3 +267,6 @@ cython_debug/
 
 # ruff
 .ruff_cache/
+
+# Interview guide
+interview.md

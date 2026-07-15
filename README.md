@@ -1,596 +1,375 @@
-# Intelligent Hostel Allocation System
+# Hostel Allocation System
 
-An automated, intelligent hostel room allocation system built with NestJS (core services), React (frontend), and Python (allocation engine).
+A two-stage, heuristic-based automated room allocation engine designed to resolve large-scale student placement across multiple hostels, satisfying prioritized administrative rules, group cohesion preferences, and atomic roommate constraints.
 
-## 🏗️ Architecture
+The system is split into a robust administrative REST API (NestJS) and an asynchronous, in-memory allocation orchestrator (FastAPI).
 
-The system follows a microservices architecture:
+---
 
-- **Core Services (NestJS)** - Authentication, user management, hostel/room management ([API Docs](http://localhost:3000/api/docs))
-- **Frontend (React + React Router 7)** - Student and warden dashboards
-- **Allocation Engine (Python + FastAPI)** - CSP + Bin Packing algorithm for smart allocation
+## System at a Glance
 
-## 🚀 Quick Start
+* **Multi-Stage Heuristic Pipeline:** Replaces traditional manual assignment with a deterministic priority-ordered candidate pruning phase followed by an FFD-style descending-size greedy packing heuristic.
+* **Atomic Roommate Units:** Pre-packing phase binds accepted roommates into unsplittable units, enforcing roommate co-location before capacity validation.
+* **DFS Cycle Detection:** Directed graph modeling of swap requests allowing automated discovery and execution of multi-party room exchange cycles.
+* **Transactional Publication + Snapshot-Based Restore:** State commits utilize pre-mutation JSONB snapshots within PostgreSQL `SERIALIZABLE` transactions, ensuring safe application-level compensating restores of bulk assignments.
 
-### Prerequisites
+---
 
-- Node.js 18+
-- Python 3.10+
-- Docker & Docker Compose
-- PostgreSQL (or use Docker)
+# 1. Problem Model
 
-### 1. Start the Database
+Hostel allocation is not a standard CRUD application; it is a constrained resource assignment problem.
 
-```bash
-# Using existing PostgreSQL or:
-docker compose up -d
+**S** = Students applying for rooms (grouped or individual).
+**R** = Physical rooms (bins with fixed capacities).
+**C** = Administrative rules (e.g., "Year 1 students must go to Hostel A").
+
+The engine must assign every $s \in S$ to an $r \in R$ such that:
+1. **Hard Constraints:** Room capacity is not exceeded, gender policies are strictly enforced, and mutually accepted roommate pairs are placed in the same room.
+2. **Priority Constraints:** Multi-dimensional administrative rules (hostel, wing, year) dictate where cohorts are allowed or blocked.
+3. **Heuristic Optimization:** Large student groups are placed in the highest-proximity available rooms to maximize social cohesion.
+
+---
+
+# 2. Architecture
+
+```mermaid
+graph TD
+    UI[React Frontend] --> |REST / Polling| API[Core API - NestJS]
+    
+    subgraph Core System [Core Services]
+        API --> Admin[Admin & Rules]
+        API --> Groups[Groups & Invitations]
+        API --> Swaps[Swap Cycle Engine]
+        API --> Orchestrator[Allocation Orchestrator]
+    end
+
+    Orchestrator --> |JSON Context Trigger| Engine[Allocation Engine - FastAPI]
+
+    subgraph Python Engine [Allocation Engine]
+        Engine --> Hydration[State Hydration]
+        Hydration --> Pruning[Priority Rule Pruning]
+        Pruning --> Atomic[Atomic Unit Construction]
+        Atomic --> Packing[FFD-style Wing Packing]
+    end
+
+    Admin --> |Reads/Writes| DB[(PostgreSQL)]
+    Swaps --> |Reads/Writes| DB
+    Orchestrator --> |Reads/Writes| DB
 ```
 
-### 2. Start Core Services (NestJS)
+### Boundary Definitions
+- **Core API (NestJS):** Owns persistent domain state (Students, Rooms, Rules, Results). Provides transactional integrity for administrative commits and handles user workflows.
+- **Allocation Engine (Python):** Owns ephemeral execution state. Operates over a hydrated in-memory context, so candidate-pruning and packing inner loops do not perform database round trips.
 
-```bash
-cd core-services
-npm install
-npm run start:dev
+---
+
+# 3. Allocation Engine & Algorithms
+
+### 3.1 Priority-Ordered Candidate Pruning
+The first stage reduces the candidate space of all rooms down to a valid subset for each student.
+
+**Algorithm:** Priority-ordered first-match rule resolver.
+1. All rules are sorted descending by priority.
+2. The engine evaluates rules linearly against the student's properties (year) and the room's properties (hostel, wing).
+3. The *first matching rule* dictates whether the room is allowed or blocked.
+4. Gender policies act as a hard boolean mask applied before rules.
+
+**Worked Priority-Rule Example:**
+Consider `Student(year: 2)`.
+`Room(hostel: A, wing: North)`
+
+*Rules Evaluated (Desc Priority):*
+- Rule 1 (Priority 200, Year: 1, Hostel: A): *No match*
+- Rule 2 (Priority 150, Year: 2, Hostel: A): **Match! (Decision: ALLOW)**
+- Rule 3 (Priority 50, Year: 2, Hostel: A, Wing: North): *Not evaluated (Rule 2 already decided)*
+
+**Determinism Warning:** 
+The candidate-pruning function is deterministic for a fixed ordered rule input. However, end-to-end rule resolution is not guaranteed deterministic for conflicting equal-priority rules because the TypeORM query (`queryRunner.manager.find()`) does not specify ordering and Python's stable sort preserves incoming order among equal-priority rules. 
+
+If Rule A (Priority 100, ALLOW) and Rule B (Priority 100, DENY) match, the outcome is strictly dependent on the unspecified row order returned by PostgreSQL.
+
+### 3.2 Hierarchical Placement Strategy
+
+Placement decisions operate at three granularities:
+1. **Student × Room** → Eligibility resolution (Candidate Pruning).
+2. **Group × Wing** → Placement-region selection.
+3. **Atomic Unit × Room** → Capacity packing.
+
+**Normal Group Placement Path:**
+group received → determine wings where every member is eligible → evaluate whether whole group can fit → rank candidate wings → construct atomic roommate units → descending-size room packing.
+
+**Fallback Split Path:**
+whole-group placement fails (no single wing fits all) → select initial wing → pack atomic units that fit → calculate proximity score for alternative wings → continue placement without splitting atomic units.
+
+### 3.3 FFD-Style Descending-Size Packing Heuristic
+After pruning, the engine places students using a greedy bin-packing approach designed to maximize group cohesion.
+
+**ITEM:** Atomic units (arrays of size 1 or 2 students).
+**BIN:** Rooms within a physical Wing.
+**ITEM SIZE:** 1 or 2.
+**BIN CAPACITY:** Available beds (1 to 4).
+**BIN ORDER:** Wings are sorted by unit-fit capability, then by rule priority, then by total capacity.
+**FIRST-FIT CONDITION:** The algorithm sorts units descending by size (placing pairs before individuals) and places each unit into the first room with sufficient remaining capacity.
+
+This is an FFD-style descending-size greedy packing heuristic. It differs from textbook FFD because it heavily modifies bin ordering by factoring in rule priority and a consolidation score (occupying partially full rooms first), rather than purely sorting bins by remaining capacity.
+
+---
+
+# 4. End-to-End Allocation Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant AdminUI as Admin Frontend
+    participant NestJS as NestJS API
+    participant DB as PostgreSQL
+    participant Python as Python Engine
+
+    AdminUI->>NestJS: POST /admin/allocation/trigger
+    activate NestJS
+    NestJS->>DB: query rules, lock states
+    NestJS->>DB: create AllocationRun (QUEUED)
+    NestJS->>Python: POST /allocate (JSON context payload)
+    Python-->>NestJS: HTTP 200 (run_id)
+    NestJS-->>AdminUI: return run_id
+    deactivate NestJS
+    
+    NestJS->>NestJS: start in-memory setTimeout polling loop
+    
+    activate Python
+    Python->>Python: queue -> running -> execute algorithm -> completed
+    deactivate Python
+    
+    loop Every 5s
+        NestJS->>Python: GET /allocation/:run_id
+        Python-->>NestJS: return results
+    end
+    
+    NestJS->>DB: persist AllocationResult rows
+    NestJS->>DB: update AllocationRun (COMPLETED)
+    
+    loop Every 5s
+        AdminUI->>NestJS: GET /admin/allocation/:run_id/status
+        NestJS-->>AdminUI: status: COMPLETED
+    end
 ```
 
-The API will be available at:
+### Dual Allocation State Machines
+The allocation workflow depends on two related state machines synchronized via polling.
 
-- API: <http://localhost:3000>
-- Swagger Docs: <http://localhost:3000/api/docs>
+1. **Persistent orchestration state:** PostgreSQL / NestJS `AllocationRun` (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`).
+2. **Ephemeral execution state:** Python `allocation_runs` in-memory dictionary.
 
-### 3. Start Frontend (React)
+**The Architectural Flaw:** Workflow progress depends on an ephemeral orchestrator continuation. If NestJS restarts during a run, its `setTimeout` polling loop is destroyed. Python will successfully complete the job, but NestJS will never retrieve it, permanently stranding the run in a `RUNNING` state in PostgreSQL.
 
-```bash
-cd frontend
-npm install
-npm run dev
+If Python crashes or restarts, its memory clears. NestJS polling will receive an HTTP 404 (run missing) or a network error. Failure classification is coarse-grained: transport failures and missing engine execution state are collapsed into the same persistent `FAILED` state.
+
+---
+
+# 5. Swap Engine and Graph Cycles
+
+Students issue direct or open swap requests, forming a directed graph where edges represent `requesterId -> targetStudentId`.
+
+### Cycle Detection
+The engine implements **Depth-First Search (DFS)** using `visited` and recursion stack (`recStack`) sets to trace paths. When a back-edge is found in the `recStack`, a valid cycle is extracted and validated against gender and cross-hostel year constraints.
+
+### Execution Risks
+`executeSwapChain` loops over the participants, updating `Student.currentRoomId` sequentially (`await this.studentRepository.save()`) without a database transaction.
+
+- **Atomicity Failure / Partial Persistence:** A mid-loop failure can persist a partial assignment rotation, leaving the database in a state that no longer represents a valid execution of the original swap cycle.
+- **Invariant Violation:** Because `currentRoomId` is not unique, a partial rotation can leave one room with zero student references while another room has multiple student references. Whether this violates capacity depends on the target room's configured capacity (e.g. 2 students pointing to a 1-capacity room).
+- **Validation TOCTOU:** The chain is validated fully before the loop begins. A concurrent administrative edit between validation and iteration will result in a stale graph execution.
+
+---
+
+# 6. Transactional Publication + Snapshot-Based Restore
+
+When an allocation is published, NestJS utilizes a `SERIALIZABLE` transaction to apply room mutations and write a deep JSONB snapshot of the pre-mutation state into the `AdministrativeAction` audit table.
+
+The publication is atomic inside the `SERIALIZABLE` transaction. The JSONB snapshot supports a later **application-level compensating restore**. It is NOT a rollback of the original committed PostgreSQL transaction. 
+
+If a mistake is made:
+1. Original transaction COMMITs.
+2. Snapshot remains in the audit log.
+3. Later administrative restore operation reads the snapshot.
+4. New transaction reapplies the captured state.
+
+---
+
+# 7. Complexity Model
+
+Algorithmic upper bounds derived from the implementation (these bounds differ from real-world average cases due to early termination and heuristic pruning).
+
+- $S$ = Students
+- $G$ = Groups
+- $R$ = Rooms
+- $U$ = Allocation rules
+- $W$ = Wings
+- $A_g$ = Atomic units in group $g$
+- $V$ = Swap graph vertices
+- $E$ = Swap graph edges
+
+| Stage | Algorithmic Bound | Notes |
+| :--- | :--- | :--- |
+| **Candidate Pruning** | $O(S \cdot R \cdot U)$ | Iterates all rules for all rooms per student. |
+| **Atomic Unit Construction**| $O(S)$ | Linear pass grouping verified mutual accepts. |
+| **Wing Ranking** | $O(G \cdot W \log W)$ | Sorted dynamically once per group. |
+| **Descending Unit Sort** | $\sum O(A_g \log A_g)$ | Sort units within each group by size. |
+| **Room Packing** | $O(S \cdot R)$ | In worst case, a unit scans all rooms in a wing. |
+| **DFS Cycle Detection** | $O(V + E)$ | Standard recursive DFS. |
+
+---
+
+# 8. Persistence Model
+
+```mermaid
+erDiagram
+    Hostel ||--o{ Room : contains
+    Room ||--o{ Student : "allocatedRoomId / currentRoomId"
+    Group ||--o{ GroupMembership : has
+    Student ||--o{ GroupMembership : participates
+    Student ||--o{ RoommateInvitation : "sender / receiver"
+    AllocationRun ||--o{ AllocationResult : generates
+    Student ||--o{ AllocationResult : "receives"
+    Student ||--o{ SwapRequest : "requester / target"
 ```
 
-Frontend available at: <http://localhost:5173> (or 5174)
+### Schema-Enforced Invariants
+- Foreign key constraints heavily govern relational integrity (e.g. deleting a Hostel with Rooms fails).
+- `Student.rollNumber` is uniquely constrained.
 
-### 4. Start Allocation Engine (Python)
+### Application-Enforced Invariants (Vulnerable to DB races)
+- **Roommate Uniqueness:** The application checks for existing `ACCEPTED` invitations before allowing a new one, but there is no schema-level check.
+- **Room Capacity:** `Student.currentRoomId` does NOT have a unique constraint, allowing capacity violations during a partial swap failure.
+- **Rule Priorities:** Equal priorities are not constrained or ordered by the schema, leading to application-level non-determinism.
 
-```bash
-cd allocation-engine
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python -m app.main
-```
+---
 
-Allocation API at: <http://localhost:8000>
+# 9. API Surface
 
-## 📁 Project Structure
+| Domain | Method | Route | Auth / Role | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| **Auth** | POST | `/auth/login` | Public | Authenticate user, issue JWT. |
+| **Students** | GET | `/students/me` | `JwtAuthGuard` | Fetch current student context. |
+| **Groups** | POST | `/groups` | `JwtAuthGuard` | Create a proximity group. |
+| **Invitations**| POST | `/roommate-invitations` | `JwtAuthGuard` | Send a roommate request. |
+| **Admin** | POST | `/admin/allocation/trigger` | `JwtAuthGuard` | Dispatch an Allocation Run. |
+| **Admin** | POST | `/admin/allocation/:id/publish`| `JwtAuthGuard` | Commit results to live state. |
+| **Admin** | GET | `/admin/allocation/:id/status`| Public (override) | Poll for run completion. |
+| **Swaps** | GET | `/swaps/detect-cycles` | `JwtAuthGuard` | Returns valid exchange cycles. |
+| **Swaps** | POST | `/swaps/execute-chain` | `JwtAuthGuard` | Iteratively execute a swap cycle. |
+
+**Important Execution Flow: Publish Allocation**
+HTTP POST `/admin/allocation/:id/publish` → `AdminController` → `AdminService.publishAndCommitRun()` → `this.dataSource.transaction(SERIALIZABLE)` → Updates `AllocationResult.isLocked`, `Room.status`, `Student.currentRoomId` → Writes `AdministrativeAction` JSONB Snapshot → HTTP 200 Response.
+
+---
+
+# 10. Authentication and Authorization
+
+The API uses Passport-based JWT Authentication.
+**Request Path:** Request → `JwtAuthGuard` → JWT Validation (`JwtStrategy`) → Authenticated Principal (`req.user`) → Controller.
+
+Controller-level inspection shows authentication guards but no explicit role guard on these routes. Service-level inspection also reveals no explicit administrative role validation. This is an authorization gap and a broken access-control risk; frontend route restrictions alone would not constitute a server-side authorization boundary. This represents a significant risk for high-impact actions like triggering allocations and executing swap chains.
+
+---
+
+# 11. Engineering Decisions and Trade-Offs
+
+| Decision | System Constraint | Chosen Approach | Alternative Considered | Trade-Off |
+| :--- | :--- | :--- | :--- | :--- |
+| **Engine Separation** | Heavy computation blocks the Node.js event loop. | Separate Python FastAPI engine. | Run logic natively in NestJS. | Avoids event loop starvation but introduces a distributed state coordination problem. *(Architectural effect of the current design).* |
+| **Context Hydration** | Candidate evaluation performs nested student-room-rule iteration; database access inside these inner loops would introduce repeated database/network round trips. | NestJS materializes the allocation context and sends it to the engine as a JSON payload. | Python queries PostgreSQL directly during evaluation. | Inner algorithmic loops operate on local memory, but each run pays serialization, transfer, and per-run memory costs and evaluates a snapshot that can become stale relative to later database mutations. |
+| **Rule Resolution** | Extremely fast decision bounds needed. | Priority-ordered first-match resolver. | Constraint Satisfaction Problem (CSP). | Highly deterministic (with strictly ordered rules) but sacrifices mathematical optimality. |
+| **Swap Execution** | Multi-party cycles require rotation. | Non-transactional sequential loop. | `dataSource.transaction`. | Leaves the system vulnerable to partial execution failures and TOCTOU bugs. |
+| **Snapshot Restore**| Admins need safety for bulk commits. | JSONB pre-mutation snapshot stored for compensating restores. | Event Sourcing (CQRS). | Event-sourced reconstruction would require a broader event model and replay semantics, while the current pre-mutation snapshot is simpler for restoring the specific bulk administrative state represented by the workflow. Restoring state requires applying mutations proportional to the captured entities. |
+
+---
+
+# 12. Testing and Verification
+
+**What the Repository Tests:**
+The repository currently lacks a formalized, comprehensive test suite in the provided context structure. Minimal default unit tests (e.g. `app.controller.spec.ts`) exist.
+
+**What the Repository Does Not Yet Prove:**
+There is **no automated coverage** verifying:
+- Roommate atomicity guarantees under stress.
+- Locked assignment preservation.
+- Deterministic handling of equal-priority rule conflicts.
+- Concurrent swap mutation safety.
+- Orchestrator restart recovery.
+
+---
+
+# 13. Repository Structure
 
 ```text
-├── core-services/          # NestJS backend
+├── core-services/             # NestJS API (Port 3000)
 │   ├── src/
-│   │   ├── auth/          # Authentication module
-│   │   ├── students/      # Student management
-│   │   └── entities/      # TypeORM entities
-│   └── ...
-├── frontend/              # React frontend
+│   │   ├── auth/              # JWT Authentication
+│   │   ├── admin/             # Allocation orchestration & rule endpoints
+│   │   ├── swaps/             # DFS cycle detection & non-transactional execution
+│   │   ├── entities/          # TypeORM Models (PostgreSQL schema)
+│   │   └── main.ts            # NestJS Bootstrap
+│   ├── package.json           # Node dependencies
+├── allocation-engine/         # Python FastAPI Engine (Port 8000)
 │   ├── app/
-│   │   ├── routes/        # Page components
-│   │   ├── components/    # Reusable UI components
-│   │   └── lib/           # API client & stores
-│   └── ...
-├── allocation-engine/     # Python allocation service
+│   │   ├── main.py            # API endpoints & in-memory run tracking
+│   │   └── allocation.py      # Core Algorithm (Pruning, Atomic Units, FFD)
+│   ├── requirements.txt       # Python dependencies
+├── frontend/                  # React SPA (Vite)
 │   ├── app/
-│   │   ├── allocation.py  # CSP + Bin Packing algorithm
-│   │   └── main.py        # FastAPI server
-│   └── ...
-└── docker-compose.yml     # PostgreSQL setup
+│   │   ├── routes/            # Route components (admin, student)
 ```
-
-## 🔑 Features
-
-### For Students
-
-- Register/login with JWT auth
-- Manage profile (roll number, year, gender, program)
-- Create one group and invite by roll number
-- Consent-based invitation flow (`pending`/`accepted`/`declined`)
-- View and respond to swap requests
-
-### For Wardens/Admin
-
-- Manage hostels, wings, floors, and rooms
-- Bulk room creation for faster setup
-- Configure allocation rules (year, room type, priority, allow/deny)
-- Run allocation in two modes: `group_based` and `fcfs`
-- Review allocation history and per-run results
-- View swap cycles and execute chain swaps
-
-### Allocation Intelligence
-
-- Two-stage allocation (CSP + First-Fit Decreasing bin packing)
-- Gender-aware and rule-aware room eligibility filtering
-- Group split fallback with proximity scoring
-- Per-student happiness score in allocation results
-- Allocation decision audit trail (`availableRooms`, `constraintsApplied`, `alternativesConsidered`)
-
-## 📈 Current Delivery Status (March 2026)
-
-### MVP Scope Progress
-
-- Completed: core authentication, student profiles, consent-based groups, admin hostel/room/rules management, allocation engine integration, swaps, and frontend dashboards
-- Partially complete: allocation approval/finalization workflow (UI placeholder exists; no dedicated finalize endpoint yet)
-- Not started: notification microservice (email/SMS), RabbitMQ integration, Redis caching
-
-Estimated MVP completion: **~82% complete**, **~18% remaining**.
-
-### Full Roadmap Progress
-
-The long-term plan also includes Phase 2/3 modules (maintenance, communication hub, payments, inventory, AI analytics). These are not implemented yet.
-
-Estimated full roadmap completion: **~52% complete**, **~48% remaining**.
-
-## 🧮 Allocation Algorithm
-
-The system uses a two-stage hybrid algorithm:
-
-1. **Stage 1: Constraint Satisfaction Problem (CSP)**
-   - Filters valid room assignments based on rules
-   - Uses python-constraint library
-
-2. **Stage 2: Bin Packing (First-Fit Decreasing)**
-   - Groups are "items", wings are "bins"
-   - Maximizes group cohesion
-   - Larger groups placed first
-
-## 📚 API Documentation
-
-Access Swagger UI at <http://localhost:3000/api/docs> for interactive API documentation.
-
-### Key Endpoints
-
-**Authentication:**
-
-- `POST /auth/register` - Register new user
-- `POST /auth/login` - Login
-- `GET /auth/profile` - Get current user profile
-
-**Students:**
-
-- `GET /students` - List all students
-- `GET /students/roll/:rollNumber` - Find by roll number
-
-## 🛠️ Development
-
-### Environment Variables
-
-Core Services (`.env`):
-
-```env
-DB_HOST=localhost
-DB_PORT=5433
-DB_USERNAME=postgres
-DB_PASSWORD=postgres
-DB_DATABASE=hostel_allocation
-JWT_SECRET=your-secret-key
-JWT_EXPIRATION=7d
-```
-
-```sql
-hasSubmitted BOOLEAN NOT NULL DEFAULT FALSE;
-applicationStatus VARCHAR NOT NULL DEFAULT 'NONE';
-```
-
-Purpose:
-
-- `hasSubmitted` controls whether the student is included in allocation
-- `applicationStatus` tracks the current phase of the student's request
-
-Example values:
-
-```text
-NONE
-PENDING
-UPGRADE_REQUESTED
-WAITLISTED
-```
-
-### AllocationRun Entity
-
-Added:
-
-```text
-targetYears INTEGER[]
-targetPrograms TEXT[]
-```
-
-Purpose:
-
-- Tracks which cohort was targeted in the allocation run
-- Enables selective reset of only those students after commit
-
-Example:
-
-```json
-{
-  "targetYears": [1, 4],
-  "targetPrograms": ["CSE", "ECE"]
-}
-```
-
-### AllocationRule Entity
-
-Added:
-
-```text
-wingName VARCHAR NULL
-```
-
-This extends rule targeting from hostel level to hostel + wing level.
-
-Example:
-
-```text
-Hostel: BH1
-Wing: E
-Year: 1
-Allowed: true
-Priority: 100
-```
-
-This enables:
-
-- Wing E reserved for first-year students
-- Wings A/B reserved for fourth-year students
-- Fine-grained co-ed / mixed building policies
-
-### AdministrativeAction Entity (New)
-
-A new table was added:
-
-```text
-administrative_actions
-```
-
-Schema:
-
-```text
-id UUID PRIMARY KEY
-actionType ENUM('EVICTION', 'ALLOCATION_COMMIT')
-performedBy UUID
-timestamp TIMESTAMPTZ
-snapshot JSONB
-```
-
-Example snapshot:
-
-```json
-{
-  "student_101": "room_12",
-  "student_102": "room_13"
-}
-```
-
-Purpose:
-
-- Stores the exact student → room mapping before a major admin action
-- Enables rollback of evictions and commits
 
 ---
 
-## 3. Backend Changes (NestJS)
+# 14. Prerequisites, Environment, and Local Development
 
-### Allocation Commit Enhancements
+**Prerequisites:**
+- Node.js (v18+)
+- Python (3.10+)
+- PostgreSQL
+- Docker & Docker Compose (optional)
 
-The `publishAndCommitRun` flow was redesigned.
+**Environment Variables:**
+Core API `.env` structure:
+- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+- `JWT_SECRET` (Required secret, do not expose in source control)
+- `ALLOCATION_ENGINE_URL`
 
-New behavior:
-
-1. Before commit, capture the current room state of all affected students
-2. Save the snapshot into `AdministrativeAction`
-3. Commit all room changes inside one SQL transaction
-4. Update old room status to `AVAILABLE`
-5. Update new room status to `OCCUPIED`
-6. Reset targeted students after successful commit
-
-Example reset logic:
-
-```ts
-student.hasSubmitted = false;
-student.applicationStatus = 'NONE';
-```
-
-### Bulk Eviction Enhancements
-
-`bulkEvictStudents` now:
-
-- Captures a rollback snapshot before eviction
-- Clears student room assignments
-- Resets `hasSubmitted = false`
-- Stores the action in `AdministrativeAction`
-
-### Rollback API
-
-New rollback support added.
-
-Endpoint:
-
-```text
-POST /admin/actions/:id/rollback
-```
-
-Behavior:
-
-- Loads snapshot JSON from `AdministrativeAction`
-- Restores student room assignments
-- Fixes room statuses automatically
-- Executes everything transactionally
-
-### Reset Application Status Endpoint
-
-New endpoint:
-
-```text
-POST /admin/allocation/reset-status
-```
-
-Optional request:
-
-```json
-{
-  "year": 2
-}
-```
-
-Purpose:
-
-- Allows wardens to reopen allocation for a specific year
-
-### Allocation Draft Deletion
-
-New endpoint:
-
-```text
-DELETE /admin/allocation/runs/:id
-```
-
-Purpose:
-
-- Delete failed / unfinished allocation runs
-- Prevent admins from getting stuck with invalid drafts
+**Startup Commands (Verified):**
+- **Database:** `docker-compose up -d`
+- **NestJS:** `cd core-services && npm install && npm run start:dev`
+- **Python:** `cd allocation-engine && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000`
+- **Frontend:** `cd frontend && npm install && npm run dev`
 
 ---
 
-## 4. Rules Matrix System
+# 15. Deployment Topology
 
-The old flat rule list has been replaced with a hierarchical eligibility matrix.
+The system deploys as three independent compute processes communicating over HTTP, supported by a single persistent data store.
 
-Structure:
+- **Frontend:** Statically built SPA served to clients.
+- **Core API (NestJS):** Owns all persistent state, running on Node.js.
+- **Database (PostgreSQL):** The single source of truth.
+- **Allocation Engine (Python):** Purely ephemeral compute process. Holds no persistent connections to the database.
 
-```json
-{
-  "BH1": {
-    "_all": {
-      "1": true,
-      "2": false,
-      "3": false,
-      "4": true
-    },
-    "wings": {
-      "A": {
-        "4": true
-      },
-      "B": {
-        "4": true
-      },
-      "E": {
-        "1": true
-      }
-    }
-  }
-}
-```
-
-Backend translation strategy:
-
-1. Delete all previous rules
-2. Traverse the matrix
-3. Generate new `AllocationRule` rows
-4. Automatically assign priorities
-
-This ensures there are no stale or conflicting rules.
+The NestJS API is largely backed by PostgreSQL for domain state, but allocation orchestration still includes process-local polling continuations. Scaling the API horizontally therefore requires explicit run ownership or reconciliation coordination. Python engine scaling is similarly constrained by its process-local allocation run state.
 
 ---
 
-## 5. Allocation Engine Changes (Python)
+# 16. Technical Roadmap
 
-### Highest Priority Wins
+**P0 — Data Integrity**
+- **Transactional Swap Execution:** Wrap `executeSwapChain` in `dataSource.transaction`.
+- **Database-Level Roommate Invariant:** Move accepted roommate relationships to a schema that enforces unique student participation in at most one active pair, rather than relying only on service-level invitation checks.
 
-The engine previously allowed lower-priority rules to override higher-priority rules.
+**P1 — Determinism**
+- **Explicit Secondary Rule Ordering:** Add an `ORDER BY id ASC` clause to the TypeORM query fetching rules to resolve equal-priority conflicts predictably.
 
-Example problem:
+**P2 — Orchestration Durability**
+- **Startup Reconciliation:** Implement an `onModuleInit` hook in NestJS to scan for `QUEUED`/`RUNNING` runs and restart the polling loops.
+- **Durable Job Ownership:** (Future Evolution) Migrate from in-memory polling to a durable job queue (e.g., BullMQ) or event-driven callback completion.
 
-```text
-Priority 100 → Allow BH1 Wing A for 4th year
-Priority 10  → Deny BH1 entirely
-```
-
-The lower-priority deny incorrectly won.
-
-Now:
-
-1. Collect all matching rules
-2. Sort descending by priority
-3. Evaluate only the first rule
-4. Immediately return its decision
-
-Pseudo-code:
-
-```python
-rules = sorted(matching_rules, key=lambda r: r.priority, reverse=True)
-
-for rule in rules:
-    return rule.is_allowed
-```
-
-### Relocatable Student Logic
-
-Students with existing rooms can now still participate in allocation.
-
-Input example:
-
-```json
-{
-  "studentId": 42,
-  "currentRoomId": 15,
-  "relocatable_from": 15
-}
-```
-
-Engine behavior:
-
-- Temporarily marks room 15 as available
-- Searches for a better room
-- Only moves student if a higher-priority room exists
-- Otherwise automatically restores original room
-
-This prevents accidental displacement.
-
----
-
-## ✨ Key System Features (Summary)
-
-## Updated Features
-
-### Full Student Features
-
-- Register/login with JWT auth
-- Manage profile (roll number, year, gender, program)
-- Create and manage groups
-- Invite students with consent-based workflow
-- Submit new applications even after already having a room
-- Participate in rolling allocation cycles
-- Receive reset eligibility after warden approval
-- View and respond to swap requests
-
-### Full Administrative Features
-
-- Manage hostels, wings, floors, and rooms
-- Configure eligibility using Rules Matrix UI
-- Run allocations in `group_based` or `fcfs`
-- Commit allocations directly to live room assignments
-- Reset application status by year/program
-- Delete failed draft runs
-- View rollback logs
-- Revert accidental commits/evictions
-- Automatically update room statuses during swaps/upgrades
-
-### Core Allocation Algorithm
-
-- Two-stage CSP + Bin Packing algorithm
-- Highest-priority-wins rule engine
-- Wing-level hostel rules
-- Smart relocation support
-- Rollback-safe allocation commits
-- Group cohesion optimization
-- Automatic fallback to previous room if no better room exists
-
-## Dynamic Allocation Flow
-
-```text
-Student already has a room
-        ↓
-Student submits upgrade request
-        ↓
-hasSubmitted = true
-        ↓
-Student is included in allocation again
-        ↓
-Current room becomes temporarily available
-        ↓
-If better room found → move student
-Else → keep original room
-```
-
-## New API Endpoints
-
-### Allocation Endpoints
-
-```text
-POST   /admin/allocation/run
-POST   /admin/allocation/commit/:runId
-DELETE /admin/allocation/runs/:id
-POST   /admin/allocation/reset-status
-POST   /admin/actions/:id/rollback
-```
-
-### Rules Matrix Endpoints
-
-```text
-GET  /admin/rules/matrix
-POST /admin/rules/matrix
-```
-
-## Example Rules Matrix Payload
-
-```json
-{
-  "BH1": {
-    "_all": {
-      "1": true,
-      "2": false,
-      "3": false,
-      "4": true
-    },
-    "wings": {
-      "A": {
-        "4": true
-      },
-      "B": {
-        "4": true
-      },
-      "E": {
-        "1": true
-      }
-    }
-  }
-}
-```
-
-## Delivery Status (March 2026)
-
-### Completed
-
-- Authentication and profile management
-- Consent-based groups
-- Rules Matrix UI
-- Wing-level allocation rules
-- Smart relocation / upgrade logic
-- Rolling allocation cycles
-- Allocation commit + room status synchronization
-- Bulk eviction + rollback
-- Delete draft runs
-- System logs and rollback history
-- Dashboard unlock using `hasSubmitted`
-
-### Partially Complete
-
-- Notification microservice
-- RabbitMQ integration
-- Redis caching
-- Drag-and-drop override UI
-- **Student Eligibility Transparency**: A feature to allow wardens to toggle visibility of hostel eligibility and max roommate limits (applied hostel-wise) on the student dashboard.
-
-### Not Started
-
-- Maintenance request module
-- Communication hub
-- Payments integration
-- Inventory management
-- AI analytics
-
-Estimated MVP completion: **~90%**
-
-Estimated long-term roadmap completion: **~58%**
-
-## 📄 License
-
-MIT License
-This is the official hostel allocation for LNMIIT
+**P3 — Allocation Quality**
+- **Heuristic Quality Metrics:** Compare FFD-style output against formal CP-SAT solvers on representative fixtures.
+- **Measurement:** Measure and log group split counts and unallocated student counts systematically.
