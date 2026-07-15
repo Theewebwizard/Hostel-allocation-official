@@ -9,13 +9,15 @@ The system is split into a robust administrative REST API (NestJS) and an asynch
 ## System at a Glance
 
 * **Multi-Stage Heuristic Pipeline:** Replaces traditional manual assignment with a deterministic priority-ordered candidate pruning phase followed by an FFD-style descending-size greedy packing heuristic.
+* **Global Optimization (CP-SAT):** A sophisticated 4th allocation mode powered by Google OR-Tools that mathematically maximizes global happiness using lexicographical weights while enforcing strict administrative and roommate constraints.
+* **Bounded Preferences:** Students and groups can rank their preferred hostels. These act as a secondary sorting heuristic bounded strictly by their administrative eligibility.
 * **Atomic Roommate Units:** Pre-packing phase binds accepted roommates into unsplittable units, enforcing roommate co-location before capacity validation.
 * **DFS Cycle Detection:** Directed graph modeling of swap requests allowing automated discovery and execution of multi-party room exchange cycles.
 * **Transactional Publication + Snapshot-Based Restore:** State commits utilize pre-mutation JSONB snapshots within PostgreSQL `SERIALIZABLE` transactions, ensuring safe application-level compensating restores of bulk assignments.
 
 ---
 
-# 1. Problem Model
+## 1. Problem Model
 
 Hostel allocation is not a standard CRUD application; it is a constrained resource assignment problem.
 
@@ -24,13 +26,14 @@ Hostel allocation is not a standard CRUD application; it is a constrained resour
 **C** = Administrative rules (e.g., "Year 1 students must go to Hostel A").
 
 The engine must assign every $s \in S$ to an $r \in R$ such that:
+
 1. **Hard Constraints:** Room capacity is not exceeded, gender policies are strictly enforced, and mutually accepted roommate pairs are placed in the same room.
 2. **Priority Constraints:** Multi-dimensional administrative rules (hostel, wing, year) dictate where cohorts are allowed or blocked.
 3. **Heuristic Optimization:** Large student groups are placed in the highest-proximity available rooms to maximize social cohesion.
 
 ---
 
-# 2. Architecture
+## 2. Architecture
 
 ```mermaid
 graph TD
@@ -58,17 +61,20 @@ graph TD
 ```
 
 ### Boundary Definitions
-- **Core API (NestJS):** Owns persistent domain state (Students, Rooms, Rules, Results). Provides transactional integrity for administrative commits and handles user workflows.
-- **Allocation Engine (Python):** Owns ephemeral execution state. Operates over a hydrated in-memory context, so candidate-pruning and packing inner loops do not perform database round trips.
+
+* **Core API (NestJS):** Owns persistent domain state (Students, Rooms, Rules, Results). Provides transactional integrity for administrative commits and handles user workflows.
+* **Allocation Engine (Python):** Owns ephemeral execution state. Operates over a hydrated in-memory context, so candidate-pruning and packing inner loops do not perform database round trips.
 
 ---
 
-# 3. Allocation Engine & Algorithms
+## 3. Allocation Engine & Algorithms
 
 ### 3.1 Priority-Ordered Candidate Pruning
+
 The first stage reduces the candidate space of all rooms down to a valid subset for each student.
 
 **Algorithm:** Priority-ordered first-match rule resolver.
+
 1. All rules are sorted descending by priority.
 2. The engine evaluates rules linearly against the student's properties (year) and the room's properties (hostel, wing).
 3. The *first matching rule* dictates whether the room is allowed or blocked.
@@ -79,18 +85,20 @@ Consider `Student(year: 2)`.
 `Room(hostel: A, wing: North)`
 
 *Rules Evaluated (Desc Priority):*
-- Rule 1 (Priority 200, Year: 1, Hostel: A): *No match*
-- Rule 2 (Priority 150, Year: 2, Hostel: A): **Match! (Decision: ALLOW)**
-- Rule 3 (Priority 50, Year: 2, Hostel: A, Wing: North): *Not evaluated (Rule 2 already decided)*
 
-**Determinism Warning:** 
-The candidate-pruning function is deterministic for a fixed ordered rule input. However, end-to-end rule resolution is not guaranteed deterministic for conflicting equal-priority rules because the TypeORM query (`queryRunner.manager.find()`) does not specify ordering and Python's stable sort preserves incoming order among equal-priority rules. 
+* Rule 1 (Priority 200, Year: 1, Hostel: A): *No match*
+* Rule 2 (Priority 150, Year: 2, Hostel: A): **Match! (Decision: ALLOW)**
+* Rule 3 (Priority 50, Year: 2, Hostel: A, Wing: North): *Not evaluated (Rule 2 already decided)*
+
+**Determinism Warning:**
+The candidate-pruning function is deterministic for a fixed ordered rule input. However, end-to-end rule resolution is not guaranteed deterministic for conflicting equal-priority rules because the TypeORM query (`queryRunner.manager.find()`) does not specify ordering and Python's stable sort preserves incoming order among equal-priority rules.
 
 If Rule A (Priority 100, ALLOW) and Rule B (Priority 100, DENY) match, the outcome is strictly dependent on the unspecified row order returned by PostgreSQL.
 
 ### 3.2 Hierarchical Placement Strategy
 
 Placement decisions operate at three granularities:
+
 1. **Student × Room** → Eligibility resolution (Candidate Pruning).
 2. **Group × Wing** → Placement-region selection.
 3. **Atomic Unit × Room** → Capacity packing.
@@ -102,6 +110,7 @@ group received → determine wings where every member is eligible → evaluate w
 whole-group placement fails (no single wing fits all) → select initial wing → pack atomic units that fit → calculate proximity score for alternative wings → continue placement without splitting atomic units.
 
 ### 3.3 FFD-Style Descending-Size Packing Heuristic
+
 After pruning, the engine places students using a greedy bin-packing approach designed to maximize group cohesion.
 
 **ITEM:** Atomic units (arrays of size 1 or 2 students).
@@ -113,9 +122,22 @@ After pruning, the engine places students using a greedy bin-packing approach de
 
 This is an FFD-style descending-size greedy packing heuristic. It differs from textbook FFD because it heavily modifies bin ordering by factoring in rule priority and a consolidation score (occupying partially full rooms first), rather than purely sorting bins by remaining capacity.
 
+### 3.4 Bounded Hostel Preferences
+
+To accommodate student choice without violating administrative boundaries, the system supports ranked `hostelPreferences` for individuals and `groupPreferences` for groups.
+The core design principle is that **administrative rules remain the absolute source of truth**. Preferences act merely as a secondary lexicographical sorting heuristic. A student can never be placed into a hostel they are administratively blocked from, regardless of their preference rankings.
+
+### 3.5 Global Optimization (CP-SAT)
+
+In addition to the legacy FCFS and heuristic modes, the engine features a `global_optimization` mode using the Google OR-Tools CP-SAT solver.
+
+* **Pre-Pruning:** The boolean search space is drastically reduced by first passing students through the administrative candidate pruning phase. Variables are only instantiated for valid rooms.
+* **Constraints:** The solver strictly enforces hard constraints: max 1 room per student, room capacities, and atomic roommate units (forcing assigned boolean variables to be strictly equal across mutual roommates).
+* **Lexicographical Objective:** The objective function dynamically scales weights to guarantee that securing a bed ($W_{base}$) dominates administrative rule priorities ($W_{rule}$), which in turn strictly dominates user preference matching ($W_{pref}$). This prevents the solver from trading a bed assignment for preference points.
+
 ---
 
-# 4. End-to-End Allocation Lifecycle
+## 4. End-to-End Allocation Lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -154,6 +176,7 @@ sequenceDiagram
 ```
 
 ### Dual Allocation State Machines
+
 The allocation workflow depends on two related state machines synchronized via polling.
 
 1. **Persistent orchestration state:** PostgreSQL / NestJS `AllocationRun` (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`).
@@ -165,29 +188,32 @@ If Python crashes or restarts, its memory clears. NestJS polling will receive an
 
 ---
 
-# 5. Swap Engine and Graph Cycles
+## 5. Swap Engine and Graph Cycles
 
 Students issue direct or open swap requests, forming a directed graph where edges represent `requesterId -> targetStudentId`.
 
 ### Cycle Detection
+
 The engine implements **Depth-First Search (DFS)** using `visited` and recursion stack (`recStack`) sets to trace paths. When a back-edge is found in the `recStack`, a valid cycle is extracted and validated against gender and cross-hostel year constraints.
 
 ### Execution Risks
+
 `executeSwapChain` loops over the participants, updating `Student.currentRoomId` sequentially (`await this.studentRepository.save()`) without a database transaction.
 
-- **Atomicity Failure / Partial Persistence:** A mid-loop failure can persist a partial assignment rotation, leaving the database in a state that no longer represents a valid execution of the original swap cycle.
-- **Invariant Violation:** Because `currentRoomId` is not unique, a partial rotation can leave one room with zero student references while another room has multiple student references. Whether this violates capacity depends on the target room's configured capacity (e.g. 2 students pointing to a 1-capacity room).
-- **Validation TOCTOU:** The chain is validated fully before the loop begins. A concurrent administrative edit between validation and iteration will result in a stale graph execution.
+* **Atomicity Failure / Partial Persistence:** A mid-loop failure can persist a partial assignment rotation, leaving the database in a state that no longer represents a valid execution of the original swap cycle.
+* **Invariant Violation:** Because `currentRoomId` is not unique, a partial rotation can leave one room with zero student references while another room has multiple student references. Whether this violates capacity depends on the target room's configured capacity (e.g. 2 students pointing to a 1-capacity room).
+* **Validation TOCTOU:** The chain is validated fully before the loop begins. A concurrent administrative edit between validation and iteration will result in a stale graph execution.
 
 ---
 
-# 6. Transactional Publication + Snapshot-Based Restore
+## 6. Transactional Publication + Snapshot-Based Restore
 
 When an allocation is published, NestJS utilizes a `SERIALIZABLE` transaction to apply room mutations and write a deep JSONB snapshot of the pre-mutation state into the `AdministrativeAction` audit table.
 
-The publication is atomic inside the `SERIALIZABLE` transaction. The JSONB snapshot supports a later **application-level compensating restore**. It is NOT a rollback of the original committed PostgreSQL transaction. 
+The publication is atomic inside the `SERIALIZABLE` transaction. The JSONB snapshot supports a later **application-level compensating restore**. It is NOT a rollback of the original committed PostgreSQL transaction.
 
 If a mistake is made:
+
 1. Original transaction COMMITs.
 2. Snapshot remains in the audit log.
 3. Later administrative restore operation reads the snapshot.
@@ -195,23 +221,23 @@ If a mistake is made:
 
 ---
 
-# 7. Complexity Model
+## 7. Complexity Model
 
 Algorithmic upper bounds derived from the implementation (these bounds differ from real-world average cases due to early termination and heuristic pruning).
 
-- $S$ = Students
-- $G$ = Groups
-- $R$ = Rooms
-- $U$ = Allocation rules
-- $W$ = Wings
-- $A_g$ = Atomic units in group $g$
-- $V$ = Swap graph vertices
-- $E$ = Swap graph edges
+* $S$ = Students
+* $G$ = Groups
+* $R$ = Rooms
+* $U$ = Allocation rules
+* $W$ = Wings
+* $A_g$ = Atomic units in group $g$
+* $V$ = Swap graph vertices
+* $E$ = Swap graph edges
 
 | Stage | Algorithmic Bound | Notes |
 | :--- | :--- | :--- |
 | **Candidate Pruning** | $O(S \cdot R \cdot U)$ | Iterates all rules for all rooms per student. |
-| **Atomic Unit Construction**| $O(S)$ | Linear pass grouping verified mutual accepts. |
+| **Atomic Unit Construction** | $O(S)$ | Linear pass grouping verified mutual accepts. |
 | **Wing Ranking** | $O(G \cdot W \log W)$ | Sorted dynamically once per group. |
 | **Descending Unit Sort** | $\sum O(A_g \log A_g)$ | Sort units within each group by size. |
 | **Room Packing** | $O(S \cdot R)$ | In worst case, a unit scans all rooms in a wing. |
@@ -219,7 +245,7 @@ Algorithmic upper bounds derived from the implementation (these bounds differ fr
 
 ---
 
-# 8. Persistence Model
+## 8. Persistence Model
 
 ```mermaid
 erDiagram
@@ -234,27 +260,29 @@ erDiagram
 ```
 
 ### Schema-Enforced Invariants
-- Foreign key constraints heavily govern relational integrity (e.g. deleting a Hostel with Rooms fails).
-- `Student.rollNumber` is uniquely constrained.
+
+* Foreign key constraints heavily govern relational integrity (e.g. deleting a Hostel with Rooms fails).
+* `Student.rollNumber` is uniquely constrained.
 
 ### Application-Enforced Invariants (Vulnerable to DB races)
-- **Roommate Uniqueness:** The application checks for existing `ACCEPTED` invitations before allowing a new one, but there is no schema-level check.
-- **Room Capacity:** `Student.currentRoomId` does NOT have a unique constraint, allowing capacity violations during a partial swap failure.
-- **Rule Priorities:** Equal priorities are not constrained or ordered by the schema, leading to application-level non-determinism.
+
+* **Roommate Uniqueness:** The application checks for existing `ACCEPTED` invitations before allowing a new one, but there is no schema-level check.
+* **Room Capacity:** `Student.currentRoomId` does NOT have a unique constraint, allowing capacity violations during a partial swap failure.
+* **Rule Priorities:** Equal priorities are not constrained or ordered by the schema, leading to application-level non-determinism.
 
 ---
 
-# 9. API Surface
+## 9. API Surface
 
 | Domain | Method | Route | Auth / Role | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
 | **Auth** | POST | `/auth/login` | Public | Authenticate user, issue JWT. |
 | **Students** | GET | `/students/me` | `JwtAuthGuard` | Fetch current student context. |
 | **Groups** | POST | `/groups` | `JwtAuthGuard` | Create a proximity group. |
-| **Invitations**| POST | `/roommate-invitations` | `JwtAuthGuard` | Send a roommate request. |
+| **Invitations** | POST | `/roommate-invitations` | `JwtAuthGuard` | Send a roommate request. |
 | **Admin** | POST | `/admin/allocation/trigger` | `JwtAuthGuard` | Dispatch an Allocation Run. |
-| **Admin** | POST | `/admin/allocation/:id/publish`| `JwtAuthGuard` | Commit results to live state. |
-| **Admin** | GET | `/admin/allocation/:id/status`| Public (override) | Poll for run completion. |
+| **Admin** | POST | `/admin/allocation/:id/publish` | `JwtAuthGuard` | Commit results to live state. |
+| **Admin** | GET | `/admin/allocation/:id/status` | Public (override) | Poll for run completion. |
 | **Swaps** | GET | `/swaps/detect-cycles` | `JwtAuthGuard` | Returns valid exchange cycles. |
 | **Swaps** | POST | `/swaps/execute-chain` | `JwtAuthGuard` | Iteratively execute a swap cycle. |
 
@@ -263,7 +291,7 @@ HTTP POST `/admin/allocation/:id/publish` → `AdminController` → `AdminServic
 
 ---
 
-# 10. Authentication and Authorization
+## 10. Authentication and Authorization
 
 The API uses Passport-based JWT Authentication.
 **Request Path:** Request → `JwtAuthGuard` → JWT Validation (`JwtStrategy`) → Authenticated Principal (`req.user`) → Controller.
@@ -272,7 +300,7 @@ Controller-level inspection shows authentication guards but no explicit role gua
 
 ---
 
-# 11. Engineering Decisions and Trade-Offs
+## 11. Engineering Decisions and Trade-Offs
 
 | Decision | System Constraint | Chosen Approach | Alternative Considered | Trade-Off |
 | :--- | :--- | :--- | :--- | :--- |
@@ -280,26 +308,27 @@ Controller-level inspection shows authentication guards but no explicit role gua
 | **Context Hydration** | Candidate evaluation performs nested student-room-rule iteration; database access inside these inner loops would introduce repeated database/network round trips. | NestJS materializes the allocation context and sends it to the engine as a JSON payload. | Python queries PostgreSQL directly during evaluation. | Inner algorithmic loops operate on local memory, but each run pays serialization, transfer, and per-run memory costs and evaluates a snapshot that can become stale relative to later database mutations. |
 | **Rule Resolution** | Extremely fast decision bounds needed. | Priority-ordered first-match resolver. | Constraint Satisfaction Problem (CSP). | Highly deterministic (with strictly ordered rules) but sacrifices mathematical optimality. |
 | **Swap Execution** | Multi-party cycles require rotation. | Non-transactional sequential loop. | `dataSource.transaction`. | Leaves the system vulnerable to partial execution failures and TOCTOU bugs. |
-| **Snapshot Restore**| Admins need safety for bulk commits. | JSONB pre-mutation snapshot stored for compensating restores. | Event Sourcing (CQRS). | Event-sourced reconstruction would require a broader event model and replay semantics, while the current pre-mutation snapshot is simpler for restoring the specific bulk administrative state represented by the workflow. Restoring state requires applying mutations proportional to the captured entities. |
+| **Snapshot Restore** | Admins need safety for bulk commits. | JSONB pre-mutation snapshot stored for compensating restores. | Event Sourcing (CQRS). | Event-sourced reconstruction would require a broader event model and replay semantics, while the current pre-mutation snapshot is simpler for restoring the specific bulk administrative state represented by the workflow. Restoring state requires applying mutations proportional to the captured entities. |
 
 ---
 
-# 12. Testing and Verification
+## 12. Testing and Verification
 
 **What the Repository Tests:**
 The repository currently lacks a formalized, comprehensive test suite in the provided context structure. Minimal default unit tests (e.g. `app.controller.spec.ts`) exist.
 
 **What the Repository Does Not Yet Prove:**
 There is **no automated coverage** verifying:
-- Roommate atomicity guarantees under stress.
-- Locked assignment preservation.
-- Deterministic handling of equal-priority rule conflicts.
-- Concurrent swap mutation safety.
-- Orchestrator restart recovery.
+
+* Roommate atomicity guarantees under stress.
+* Locked assignment preservation.
+* Deterministic handling of equal-priority rule conflicts.
+* Concurrent swap mutation safety.
+* Orchestrator restart recovery.
 
 ---
 
-# 13. Repository Structure
+## 13. Repository Structure
 
 ```text
 ├── core-services/             # NestJS API (Port 3000)
@@ -322,54 +351,60 @@ There is **no automated coverage** verifying:
 
 ---
 
-# 14. Prerequisites, Environment, and Local Development
+## 14. Prerequisites, Environment, and Local Development
 
 **Prerequisites:**
-- Node.js (v18+)
-- Python (3.10+)
-- PostgreSQL
-- Docker & Docker Compose (optional)
+
+* Node.js (v18+)
+* Python (3.10+)
+* PostgreSQL
+* Docker & Docker Compose (optional)
 
 **Environment Variables:**
 Core API `.env` structure:
-- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
-- `JWT_SECRET` (Required secret, do not expose in source control)
-- `ALLOCATION_ENGINE_URL`
+
+* `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+* `JWT_SECRET` (Required secret, do not expose in source control)
+* `ALLOCATION_ENGINE_URL`
 
 **Startup Commands (Verified):**
-- **Database:** `docker-compose up -d`
-- **NestJS:** `cd core-services && npm install && npm run start:dev`
-- **Python:** `cd allocation-engine && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000`
-- **Frontend:** `cd frontend && npm install && npm run dev`
+
+* **Database:** `docker-compose up -d`
+* **NestJS:** `cd core-services && npm install && npm run start:dev`
+* **Python:** `cd allocation-engine && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000`
+* **Frontend:** `cd frontend && npm install && npm run dev`
 
 ---
 
-# 15. Deployment Topology
+## 15. Deployment Topology
 
 The system deploys as three independent compute processes communicating over HTTP, supported by a single persistent data store.
 
-- **Frontend:** Statically built SPA served to clients.
-- **Core API (NestJS):** Owns all persistent state, running on Node.js.
-- **Database (PostgreSQL):** The single source of truth.
-- **Allocation Engine (Python):** Purely ephemeral compute process. Holds no persistent connections to the database.
+* **Frontend:** Statically built SPA served to clients.
+* **Core API (NestJS):** Owns all persistent state, running on Node.js.
+* **Database (PostgreSQL):** The single source of truth.
+* **Allocation Engine (Python):** Purely ephemeral compute process. Holds no persistent connections to the database.
 
 The NestJS API is largely backed by PostgreSQL for domain state, but allocation orchestration still includes process-local polling continuations. Scaling the API horizontally therefore requires explicit run ownership or reconciliation coordination. Python engine scaling is similarly constrained by its process-local allocation run state.
 
 ---
 
-# 16. Technical Roadmap
+## 16. Technical Roadmap
 
-**P0 — Data Integrity**
-- **Transactional Swap Execution:** Wrap `executeSwapChain` in `dataSource.transaction`.
-- **Database-Level Roommate Invariant:** Move accepted roommate relationships to a schema that enforces unique student participation in at most one active pair, rather than relying only on service-level invitation checks.
+### P0 — Data Integrity
 
-**P1 — Determinism**
-- **Explicit Secondary Rule Ordering:** Add an `ORDER BY id ASC` clause to the TypeORM query fetching rules to resolve equal-priority conflicts predictably.
+* Transactional Swap Execution: Wrap `executeSwapChain` in `dataSource.transaction`.
+* Database-Level Roommate Invariant: Move accepted roommate relationships to a schema that enforces unique student participation in at most one active pair, rather than relying only on service-level invitation checks.
 
-**P2 — Orchestration Durability**
-- **Startup Reconciliation:** Implement an `onModuleInit` hook in NestJS to scan for `QUEUED`/`RUNNING` runs and restart the polling loops.
-- **Durable Job Ownership:** (Future Evolution) Migrate from in-memory polling to a durable job queue (e.g., BullMQ) or event-driven callback completion.
+### P1 — Determinism
 
-**P3 — Allocation Quality**
-- **Heuristic Quality Metrics:** Compare FFD-style output against formal CP-SAT solvers on representative fixtures.
-- **Measurement:** Measure and log group split counts and unallocated student counts systematically.
+* Explicit Secondary Rule Ordering: Add an `ORDER BY id ASC` clause to the TypeORM query fetching rules to resolve equal-priority conflicts predictably.
+
+### P2 — Orchestration Durability
+
+* Startup Reconciliation: Implement an `onModuleInit` hook in NestJS to scan for `QUEUED`/`RUNNING` runs and restart the polling loops.
+* Durable Job Ownership: (Future Evolution) Migrate from in-memory polling to a durable job queue (e.g., BullMQ) or event-driven callback completion.
+
+### P3 — Allocation Quality
+
+* Measurement: Measure and log group split counts and unallocated student counts systematically.
