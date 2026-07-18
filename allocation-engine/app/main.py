@@ -133,7 +133,7 @@ async def fetch_data_from_core_services():
             raise HTTPException(status_code=500, detail=f"Failed to process data: {str(e)}")
 
 
-async def run_allocation_task(run_id: str, request: AllocationRequest):
+async def run_allocation_task(run_id: str, request: AllocationRequest, callback_url: str | None):
     """Background task to run allocation"""
     try:
         allocation_runs[run_id]["status"] = "running"
@@ -168,18 +168,62 @@ async def run_allocation_task(run_id: str, request: AllocationRequest):
             "total_students": len(filtered_students),
             "allocated_students": len([r for r in results if r.room_id is not None])
         })
-        
+
+        # Fire webhook to NestJS if a callback URL was provided
+        if callback_url:
+            payload = {
+                "run_id": run_id,
+                "status": "completed",
+                "total_students": allocation_runs[run_id]["total_students"],
+                "allocated_students": allocation_runs[run_id]["allocated_students"],
+                "allocations": [r.model_dump() for r in results],
+                "decision_logs": [
+                    log.model_dump() if hasattr(log, "model_dump") else log
+                    for log in engine.decision_logs
+                ],
+            }
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await client.post(
+                        callback_url,
+                        json=payload,
+                        headers={"X-Webhook-Secret": settings.webhook_secret},
+                    )
+            except Exception as cb_err:
+                print(f"[Webhook] Failed to POST to {callback_url}: {cb_err}")
+
     except Exception as e:
         import traceback
         error_msg = f"Error in run_allocation_task: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
         with open("engine_error.log", "a") as f:
             f.write(error_msg + "\n")
-        
+
         allocation_runs[run_id].update({
             "status": "failed",
             "error": str(e)
         })
+
+        # Fire failure webhook so NestJS can mark the run FAILED immediately
+        if callback_url:
+            payload = {
+                "run_id": run_id,
+                "status": "failed",
+                "error": str(e),
+                "total_students": 0,
+                "allocated_students": 0,
+                "allocations": [],
+                "decision_logs": [],
+            }
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await client.post(
+                        callback_url,
+                        json=payload,
+                        headers={"X-Webhook-Secret": settings.webhook_secret},
+                    )
+            except Exception as cb_err:
+                print(f"[Webhook] Failed to POST failure callback to {callback_url}: {cb_err}")
 
 
 @app.post("/allocate", response_model=dict)
@@ -200,11 +244,12 @@ async def trigger_allocation(request: AllocationRequest, background_tasks: Backg
         "allocated_students": 0
     }
     
-    # Run allocation in background
+    # Run allocation in background; callback_url receives results via webhook push
     background_tasks.add_task(
         run_allocation_task,
         run_id,
-        request
+        request,
+        request.callback_url,
     )
     
     return {

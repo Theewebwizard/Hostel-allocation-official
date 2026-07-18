@@ -3,6 +3,9 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UnauthorizedException,
+  OnModuleInit,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In, Not, IsNull } from 'typeorm';
@@ -57,7 +60,9 @@ import { ConfigService } from '@nestjs/config';
 import { DecisionsService } from '../decisions/decisions.service';
 
 @Injectable()
-export class AdminService {
+export class AdminService implements OnModuleInit {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     @InjectRepository(Hostel)
     private hostelRepository: Repository<Hostel>,
@@ -85,6 +90,106 @@ export class AdminService {
     private decisionsService: DecisionsService,
     private dataSource: DataSource,
   ) {}
+
+  // ============ STARTUP RECONCILIATION ============
+
+  async onModuleInit(): Promise<void> {
+    const allocationEngineUrl = this.configService.get(
+      'ALLOCATION_ENGINE_URL',
+      'http://localhost:8000',
+    );
+
+    // Reconcile any runs that were QUEUED or RUNNING when NestJS last shut down.
+    // These will never receive a webhook callback because either:
+    //   - QUEUED: NestJS crashed before the HTTP POST to Python completed, OR
+    //   - RUNNING: Python was still processing but its in-memory state was lost.
+    const staleRuns = await this.runRepository.find({
+      where: [
+        { status: AllocationRunStatus.QUEUED },
+        { status: AllocationRunStatus.RUNNING },
+      ],
+    });
+
+    if (staleRuns.length === 0) return;
+
+    this.logger.warn(
+      `[Reconciliation] Found ${staleRuns.length} stale run(s) with status QUEUED/RUNNING. Checking Python engine...`,
+    );
+
+    for (const run of staleRuns) {
+      try {
+        const response = await fetch(
+          `${allocationEngineUrl}/allocation/${run.id}`,
+        );
+
+        if (response.status === 404) {
+          // Python has no memory of this run — engine restarted or never received it.
+          this.logger.warn(
+            `[Reconciliation] Run ${run.id} (status: ${run.status}) not found in Python engine (404). Marking FAILED.`,
+          );
+          await this.updateRunStatus(
+            run.id,
+            AllocationRunStatus.FAILED,
+            'System restart: run was lost before completion',
+          );
+          continue;
+        }
+
+        if (!response.ok) {
+          // Python is unavailable or returned an unexpected error — mark failed.
+          this.logger.error(
+            `[Reconciliation] Unexpected status ${response.status} for run ${run.id}. Marking FAILED.`,
+          );
+          await this.updateRunStatus(
+            run.id,
+            AllocationRunStatus.FAILED,
+            `Reconciliation check returned HTTP ${response.status}`,
+          );
+          continue;
+        }
+
+        const data = await response.json();
+
+        if (data.status === 'completed') {
+          this.logger.log(
+            `[Reconciliation] Run ${run.id} was completed in Python. Saving results.`,
+          );
+          await this.saveAllocationResults(run.id, data);
+          await this.updateRunStatus(
+            run.id,
+            AllocationRunStatus.COMPLETED,
+            undefined,
+            data.total_students,
+            data.allocated_students,
+          );
+        } else if (data.status === 'failed') {
+          this.logger.warn(
+            `[Reconciliation] Run ${run.id} failed in Python. Marking FAILED.`,
+          );
+          await this.updateRunStatus(
+            run.id,
+            AllocationRunStatus.FAILED,
+            data.error || 'Unknown engine error',
+          );
+        } else {
+          // status is 'running' or 'queued': Python is still alive and will callback.
+          this.logger.log(
+            `[Reconciliation] Run ${run.id} is still active in Python (status: ${data.status}). No action needed.`,
+          );
+        }
+      } catch (err: any) {
+        // Python is unreachable on startup — mark as failed.
+        this.logger.error(
+          `[Reconciliation] Could not reach Python engine for run ${run.id}: ${err.message}. Marking FAILED.`,
+        );
+        await this.updateRunStatus(
+          run.id,
+          AllocationRunStatus.FAILED,
+          'System restart: allocation engine unreachable during reconciliation',
+        );
+      }
+    }
+  }
 
   // ============ HOSTEL MANAGEMENT ============
 
@@ -391,8 +496,13 @@ export class AdminService {
       const savedRun = await queryRunner.manager.save(AllocationRun, run);
       await queryRunner.commitTransaction();
 
-      // Trigger background processing (no need to wait for it)
-      this.processAllocationInBackground(savedRun.id, rules, allocationMode, targetYears, targetPrograms);
+      // Trigger background processing (fire-and-forget; results delivered via webhook)
+      this.callAllocationEngine(savedRun.id, rules, allocationMode, targetYears, targetPrograms).catch(
+        (error) => {
+          this.logger.error(`[Allocation] callAllocationEngine failed for run ${savedRun.id}: ${error.message}`);
+          this.updateRunStatus(savedRun.id, AllocationRunStatus.FAILED, error.message);
+        },
+      );
 
       return savedRun;
     } catch (err) {
@@ -401,13 +511,6 @@ export class AdminService {
     } finally {
       await queryRunner.release();
     }
-  }
-
-  private async processAllocationInBackground(runId: string, rules: AllocationRule[], allocationMode: AllocationMode, targetYears?: number[], targetPrograms?: string[]) {
-    this.callAllocationEngine(runId, rules, allocationMode, targetYears, targetPrograms).catch((error) => {
-      console.error('Allocation engine error:', error);
-      this.updateRunStatus(runId, AllocationRunStatus.FAILED, error.message);
-    });
   }
 
   private async callAllocationEngine(
@@ -421,6 +524,13 @@ export class AdminService {
       'ALLOCATION_ENGINE_URL',
       'http://localhost:8000',
     );
+    const coreServicesBaseUrl = this.configService.get(
+      'CORE_SERVICES_BASE_URL',
+      'http://localhost:3000',
+    );
+
+    // Python will POST results here when the allocation completes (success or failure).
+    const callbackUrl = `${coreServicesBaseUrl}/admin/allocation/webhook/${runId}`;
 
     try {
       await this.updateRunStatus(runId, AllocationRunStatus.RUNNING);
@@ -454,16 +564,20 @@ export class AdminService {
           locked_assignments: lockedAssignments,
           target_years: targetYears ?? [],
           target_programs: targetPrograms ?? [],
+          callback_url: callbackUrl,
         }),
       });
 
-      const data = await response.json();
-
-      // The allocation engine runs asynchronously, so we just check it was queued
-      if (data.status === 'queued') {
-        // Poll for completion (in production, use webhooks or message queue)
-        this.pollAllocationStatus(runId, allocationEngineUrl);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Python engine returned HTTP ${response.status}: ${errText}`);
       }
+
+      const data = await response.json();
+      this.logger.log(
+        `[Allocation] Run ${runId} queued in Python engine (status: ${data.status}). Awaiting webhook callback at ${callbackUrl}.`,
+      );
+      // No polling — Python will push results via webhook when done.
     } catch (error: any) {
       await this.updateRunStatus(
         runId,
@@ -473,58 +587,56 @@ export class AdminService {
     }
   }
 
-  private async pollAllocationStatus(
-    runId: string,
-    engineUrl: string,
-  ): Promise<void> {
-    const maxAttempts = 60; // 5 minutes with 5-second intervals
-    let attempts = 0;
+  // ============ WEBHOOK HANDLER ============
 
-    const poll = async () => {
-      try {
-        const response = await fetch(`${engineUrl}/allocation/${runId}`);
-        const data = await response.json();
+  async handleWebhook(runId: string, payload: any): Promise<{ message: string }> {
+    const run = await this.runRepository.findOne({ where: { id: runId } });
+    if (!run) {
+      throw new NotFoundException(`Allocation run ${runId} not found`);
+    }
 
-        if (data.status === 'completed') {
-          await this.saveAllocationResults(runId, data);
-          await this.updateRunStatus(
-            runId,
-            AllocationRunStatus.COMPLETED,
-            undefined,
-            data.total_students,
-            data.allocated_students,
-          );
-        } else if (data.status === 'failed') {
-          await this.updateRunStatus(
-            runId,
-            AllocationRunStatus.FAILED,
-            data.error || 'Unknown error',
-          );
-        } else if (attempts < maxAttempts) {
-          attempts++;
-          setTimeout(poll, 5000); // Poll every 5 seconds
-        } else {
-          await this.updateRunStatus(
-            runId,
-            AllocationRunStatus.FAILED,
-            'Allocation timeout',
-          );
-        }
-      } catch (error: any) {
-        if (attempts < maxAttempts) {
-          attempts++;
-          setTimeout(poll, 5000);
-        } else {
-          await this.updateRunStatus(
-            runId,
-            AllocationRunStatus.FAILED,
-            'Failed to get allocation status',
-          );
-        }
-      }
-    };
+    // Idempotency guard: ignore callbacks for already-terminal runs.
+    if (
+      run.status === AllocationRunStatus.COMPLETED ||
+      run.status === AllocationRunStatus.FAILED
+    ) {
+      this.logger.warn(
+        `[Webhook] Received callback for already-terminal run ${runId} (status: ${run.status}). Ignoring.`,
+      );
+      return { message: 'Run already in terminal state; no action taken.' };
+    }
 
-    setTimeout(poll, 2000); // Start polling after 2 seconds
+    if (payload.status === 'completed') {
+      this.logger.log(
+        `[Webhook] Run ${runId} completed. Persisting ${payload.allocations?.length ?? 0} allocation result(s).`,
+      );
+      await this.saveAllocationResults(runId, payload);
+      await this.updateRunStatus(
+        runId,
+        AllocationRunStatus.COMPLETED,
+        undefined,
+        payload.total_students,
+        payload.allocated_students,
+      );
+      return { message: 'Allocation results persisted successfully.' };
+    }
+
+    if (payload.status === 'failed') {
+      this.logger.error(
+        `[Webhook] Run ${runId} failed in Python engine: ${payload.error}`,
+      );
+      await this.updateRunStatus(
+        runId,
+        AllocationRunStatus.FAILED,
+        payload.error || 'Unknown engine error',
+      );
+      return { message: 'Run marked as FAILED.' };
+    }
+
+    this.logger.warn(
+      `[Webhook] Received unexpected status "${payload.status}" for run ${runId}. Ignoring.`,
+    );
+    return { message: `Unrecognised status "${payload.status}"; no action taken.` };
   }
 
   private async saveAllocationResults(runId: string, data: any): Promise<void> {

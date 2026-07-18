@@ -475,7 +475,7 @@ export default function AdminPage() {
         ...(config?.targetPrograms?.length ? { targetPrograms: config.targetPrograms } : {}),
       };
       const res = await adminApi.triggerAllocation(payload);
-      setSuccess("Allocation started! Polling for results...");
+      setSuccess("Allocation started! Waiting for results...");
       loadAllData();
       pollAllocationStatus(res.data.id);
     } catch (err: any) {

@@ -9,8 +9,11 @@ import {
   Query,
   UseGuards,
   Request,
+  Headers,
   ParseIntPipe,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   ApiTags,
   ApiOperation,
@@ -45,7 +48,27 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly allocationDataService: AllocationDataService,
+    private readonly configService: ConfigService,
   ) {}
+
+  // ============ INTERNAL WEBHOOK (no JWT — called by Python engine) ============
+
+  @Post('allocation/webhook/:run_id')
+  @UseGuards() // Intentionally overrides class-level JwtAuthGuard — internal service callback
+  @ApiOperation({ summary: 'Internal: receive allocation result push from Python engine' })
+  @ApiResponse({ status: 200, description: 'Webhook processed' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid webhook secret' })
+  async allocationWebhook(
+    @Param('run_id') runId: string,
+    @Body() payload: any,
+    @Headers('x-webhook-secret') secret: string,
+  ) {
+    const expected = this.configService.get<string>('WEBHOOK_SECRET', '');
+    if (!expected || secret !== expected) {
+      throw new UnauthorizedException('Invalid or missing webhook secret');
+    }
+    return this.adminService.handleWebhook(runId, payload);
+  }
 
   // ============ DASHBOARD ============
 

@@ -87,6 +87,8 @@ class AllocationRequest(BaseModel):
     locked_assignments: Dict[int, List[str]] = {}  # room_id -> [student_id, ...]
     target_years: List[int] = []      # empty = all years (no filter)
     target_programs: List[str] = []   # empty = all programs (no filter)
+    # Webhook: NestJS supplies this URL so Python can push results instead of being polled
+    callback_url: Optional[str] = None
 
 
 class AllocationResult(BaseModel):

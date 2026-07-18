@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # Core Services
     core_services_url: str = "http://localhost:3000"
 
+    # Webhook Security
+    webhook_secret: str = "change-this-secret-in-production"
+
     # Server
     allocation_port: int = 8000
 

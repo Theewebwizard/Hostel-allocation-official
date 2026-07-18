@@ -37,7 +37,7 @@ The engine must assign every $s \in S$ to an $r \in R$ such that:
 
 ```mermaid
 graph TD
-    UI[React Frontend] --> |REST / Polling| API[Core API - NestJS]
+    UI[React Frontend] --> |REST| API[Core API - NestJS]
     
     subgraph Core System [Core Services]
         API --> Admin[Admin & Rules]
@@ -46,7 +46,8 @@ graph TD
         API --> Orchestrator[Allocation Orchestrator]
     end
 
-    Orchestrator --> |JSON Context Trigger| Engine[Allocation Engine - FastAPI]
+    Orchestrator --> |POST /allocate + callback_url| Engine[Allocation Engine - FastAPI]
+    Engine --> |POST /admin/allocation/webhook/:run_id| Orchestrator
 
     subgraph Python Engine [Allocation Engine]
         Engine --> Hydration[State Hydration]
@@ -146,45 +147,44 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant Python as Python Engine
 
-    AdminUI->>NestJS: POST /admin/allocation/trigger
+    AdminUI->>NestJS: POST /admin/allocation/run
     activate NestJS
     NestJS->>DB: query rules, lock states
     NestJS->>DB: create AllocationRun (QUEUED)
-    NestJS->>Python: POST /allocate (JSON context payload)
-    Python-->>NestJS: HTTP 200 (run_id)
-    NestJS-->>AdminUI: return run_id
+    NestJS->>Python: POST /allocate (payload + callback_url)
+    Python-->>NestJS: HTTP 200 { run_id, status: "queued" }
+    NestJS-->>AdminUI: return AllocationRun
     deactivate NestJS
     
-    NestJS->>NestJS: start in-memory setTimeout polling loop
-    
     activate Python
-    Python->>Python: queue -> running -> execute algorithm -> completed
+    Python->>Python: queued → running → execute algorithm → completed
+    Python->>NestJS: POST /admin/allocation/webhook/:run_id
+    Note right of Python: X-Webhook-Secret header attached
     deactivate Python
     
-    loop Every 5s
-        NestJS->>Python: GET /allocation/:run_id
-        Python-->>NestJS: return results
-    end
-    
+    activate NestJS
     NestJS->>DB: persist AllocationResult rows
     NestJS->>DB: update AllocationRun (COMPLETED)
+    deactivate NestJS
     
-    loop Every 5s
-        AdminUI->>NestJS: GET /admin/allocation/:run_id/status
-        NestJS-->>AdminUI: status: COMPLETED
+    loop Poll every 3s (Frontend UI refresh only)
+        AdminUI->>NestJS: GET /admin/allocation/runs/:id
+        NestJS-->>AdminUI: { status: "completed" }
     end
 ```
 
 ### Dual Allocation State Machines
 
-The allocation workflow depends on two related state machines synchronized via polling.
+The allocation workflow depends on two related state machines.
 
 1. **Persistent orchestration state:** PostgreSQL / NestJS `AllocationRun` (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`).
 2. **Ephemeral execution state:** Python `allocation_runs` in-memory dictionary.
 
-**The Architectural Flaw:** Workflow progress depends on an ephemeral orchestrator continuation. If NestJS restarts during a run, its `setTimeout` polling loop is destroyed. Python will successfully complete the job, but NestJS will never retrieve it, permanently stranding the run in a `RUNNING` state in PostgreSQL.
+**Webhook Push Model:** When Python finishes (success or failure), it POSTs results to `POST /admin/allocation/webhook/:run_id` on NestJS with a shared `X-Webhook-Secret` header. NestJS validates the secret, persists the results, and transitions the run to `COMPLETED` or `FAILED`.
 
-If Python crashes or restarts, its memory clears. NestJS polling will receive an HTTP 404 (run missing) or a network error. Failure classification is coarse-grained: transport failures and missing engine execution state are collapsed into the same persistent `FAILED` state.
+**Startup Reconciliation:** `AdminService.onModuleInit()` queries the database for any `QUEUED` or `RUNNING` runs on every NestJS startup. For each stale run, it calls `GET /allocation/{run_id}` on Python. If Python returns 404 (run is lost from memory), the run is immediately marked `FAILED`. If Python returns a terminal status, results are saved accordingly. This eliminates permanently orphaned runs caused by process restarts.
+
+If Python crashes or restarts, its in-memory state clears. The startup reconciliation hook will detect the 404 on the next NestJS start and mark the run `FAILED`.
 
 ---
 
@@ -280,9 +280,9 @@ erDiagram
 | **Students** | GET | `/students/me` | `JwtAuthGuard` | Fetch current student context. |
 | **Groups** | POST | `/groups` | `JwtAuthGuard` | Create a proximity group. |
 | **Invitations** | POST | `/roommate-invitations` | `JwtAuthGuard` | Send a roommate request. |
-| **Admin** | POST | `/admin/allocation/trigger` | `JwtAuthGuard` | Dispatch an Allocation Run. |
-| **Admin** | POST | `/admin/allocation/:id/publish` | `JwtAuthGuard` | Commit results to live state. |
-| **Admin** | GET | `/admin/allocation/:id/status` | Public (override) | Poll for run completion. |
+| **Admin** | POST | `/admin/allocation/run` | `JwtAuthGuard` | Dispatch an Allocation Run. |
+| **Admin** | POST | `/admin/allocation/runs/:id/publish` | `JwtAuthGuard` | Commit results to live state. |
+| **Admin** | POST | `/admin/allocation/webhook/:run_id` | `X-Webhook-Secret` (internal) | Receive allocation result push from Python engine. |
 | **Swaps** | GET | `/swaps/detect-cycles` | `JwtAuthGuard` | Returns valid exchange cycles. |
 | **Swaps** | POST | `/swaps/execute-chain` | `JwtAuthGuard` | Iteratively execute a swap cycle. |
 
@@ -361,11 +361,13 @@ There is **no automated coverage** verifying:
 * Docker & Docker Compose (optional)
 
 **Environment Variables:**
-Core API `.env` structure:
+Core API (NestJS) `.env` structure:
 
-* `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+* `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE`
 * `JWT_SECRET` (Required secret, do not expose in source control)
-* `ALLOCATION_ENGINE_URL`
+* `ALLOCATION_ENGINE_URL` — Base URL of the Python engine (default: `http://localhost:8000`; Docker: `http://allocation-engine:8000`)
+* `WEBHOOK_SECRET` — Shared secret used to authenticate webhook calls from Python (must match the engine's env)
+* `CORE_SERVICES_BASE_URL` — Public URL of this NestJS service, used to build the `callback_url` sent to Python (bare-metal: `http://localhost:3000`; Docker: `http://core-services:3000`)
 
 **Startup Commands (Verified):**
 
@@ -400,10 +402,10 @@ The NestJS API is largely backed by PostgreSQL for domain state, but allocation 
 
 * Explicit Secondary Rule Ordering: Add an `ORDER BY id ASC` clause to the TypeORM query fetching rules to resolve equal-priority conflicts predictably.
 
-### P2 — Orchestration Durability
+### P2 — Orchestration Durability ✅ Implemented
 
-* Startup Reconciliation: Implement an `onModuleInit` hook in NestJS to scan for `QUEUED`/`RUNNING` runs and restart the polling loops.
-* Durable Job Ownership: (Future Evolution) Migrate from in-memory polling to a durable job queue (e.g., BullMQ) or event-driven callback completion.
+* ~~Startup Reconciliation~~ **Done:** `AdminService.onModuleInit()` scans for `QUEUED`/`RUNNING` runs on startup and reconciles against the Python engine's in-memory state.
+* ~~In-memory polling~~ **Done:** Replaced the `setTimeout` polling loop with a webhook push model. Python POSTs results to `POST /admin/allocation/webhook/:run_id` (secured with `X-Webhook-Secret`) on completion or failure.
 
 ### P3 — Allocation Quality
 
