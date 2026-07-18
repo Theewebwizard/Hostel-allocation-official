@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, DataSource } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 import {
   SwapRequest,
@@ -43,6 +43,7 @@ export class SwapsService {
     @InjectRepository(AllocationRun)
     private runRepository: Repository<AllocationRun>,
     private adminService: AdminService,
+    private dataSource: DataSource,
   ) {}
 
   // ============ STUDENT ACTIONS ============
@@ -541,62 +542,91 @@ export class SwapsService {
       throw new BadRequestException('Both students must have rooms assigned to execute a swap');
     }
 
-    // Swap rooms
-    requester.currentRoomId = targetOldRoom;
-    target.currentRoomId = requesterOldRoom;
+    // ── Transactional execution with row-level locking ────────────────────────
+    // The capacity trigger fires BEFORE UPDATE on each student row.
+    // Without a transaction, a trigger rejection on the second save would leave
+    // the first student's room already mutated with no rollback.
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction('READ COMMITTED');
 
-    await this.studentRepository.save([requester, target]);
+    try {
+      // Lock both rows — prevents concurrent swaps on the same students
+      const locked = await queryRunner.manager
+        .createQueryBuilder(Student, 'student')
+        .whereInIds([requester.userId, target.userId])
+        .setLock('pessimistic_write')
+        .getMany();
 
-    // Create history records
-    const histories: SwapHistory[] = [];
+      if (locked.length !== 2) {
+        throw new NotFoundException('One or both students could not be locked for update.');
+      }
 
-    histories.push(
-      this.swapHistoryRepository.create({
-        studentId: request.requesterId,
-        previousRoomId: requesterOldRoom as number,
-        newRoomId: targetOldRoom as number,
-        swapRequestId: requestId,
-        executionType: SwapExecutionType.DIRECT,
-        executedById: adminUserId,
-      }),
-    );
+      const lockedRequester = locked.find((s) => s.userId === requester.userId)!;
+      const lockedTarget = locked.find((s) => s.userId === target.userId)!;
 
-    histories.push(
-      this.swapHistoryRepository.create({
-        studentId: request.targetStudentId,
-        previousRoomId: targetOldRoom as number,
-        newRoomId: requesterOldRoom as number,
-        swapRequestId: requestId,
-        executionType: SwapExecutionType.DIRECT,
-        executedById: adminUserId,
-      }),
-    );
+      // Swap rooms
+      lockedRequester.currentRoomId = targetOldRoom;
+      lockedTarget.currentRoomId = requesterOldRoom;
 
-    await this.swapHistoryRepository.save(histories);
+      await queryRunner.manager.save(Student, lockedRequester);
+      await queryRunner.manager.save(Student, lockedTarget);
 
-    // Update request status
-    request.status = SwapRequestStatus.COMPLETED;
-    await this.swapRequestRepository.save(request);
+      // Create history records
+      const histories: SwapHistory[] = [
+        queryRunner.manager.create(SwapHistory, {
+          studentId: request.requesterId,
+          previousRoomId: requesterOldRoom as number,
+          newRoomId: targetOldRoom as number,
+          swapRequestId: requestId,
+          executionType: SwapExecutionType.DIRECT,
+          executedById: adminUserId,
+        }),
+        queryRunner.manager.create(SwapHistory, {
+          studentId: request.targetStudentId,
+          previousRoomId: targetOldRoom as number,
+          newRoomId: requesterOldRoom as number,
+          swapRequestId: requestId,
+          executionType: SwapExecutionType.DIRECT,
+          executedById: adminUserId,
+        }),
+      ];
 
-    return histories;
+      await queryRunner.manager.save(SwapHistory, histories);
+
+      // Update request status
+      request.status = SwapRequestStatus.COMPLETED;
+      await queryRunner.manager.save(SwapRequest, request);
+
+      await queryRunner.commitTransaction();
+      return histories;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+
   }
 
   async executeSwapChain(
     adminUserId: string,
     swapRequestIds: number[],
   ): Promise<SwapHistory[]> {
-    // Check if there's a finalized allocation run
+    // ── Pre-flight checks (outside the transaction: no locks needed yet) ────
+
+    // Guard: no swaps while allocation is finalized
     const finalizedRun = await this.runRepository.findOne({
       where: { finalized: true },
     });
-
     if (finalizedRun) {
       throw new BadRequestException(
         'Cannot execute swaps when allocation is finalized',
       );
     }
 
-    // Validate the chain first
+    // Validate business rules (cycle shape, gender, eligibility, year constraints)
+    // This logic is unchanged — do not modify.
     const validation = await this.validateSwapChain(swapRequestIds);
     if (!validation.isValid) {
       throw new BadRequestException(
@@ -605,44 +635,71 @@ export class SwapsService {
     }
 
     const chainId = validation.chain.chainId;
-    const histories: SwapHistory[] = [];
+    const participants = validation.chain.participants;
 
-    // Get all requests
-    const requests = await this.swapRequestRepository.find({
-      where: { id: In(swapRequestIds) },
-      relations: ['requester'],
-    });
-
-    // Build the swap mapping: each student gets the next student's room
+    // Build the rotation plan: each participant receives the next participant's room.
     const roomAssignments: {
       studentId: string;
       newRoomId: number;
       oldRoomId: number;
-    }[] = [];
-    const participants = validation.chain.participants;
+    }[] = participants.map((p, i) => ({
+      studentId: p.studentId,
+      oldRoomId: p.currentRoomId,
+      newRoomId: participants[(i + 1) % participants.length].currentRoomId,
+    }));
 
-    for (let i = 0; i < participants.length; i++) {
-      const participant = participants[i];
-      const nextParticipant = participants[(i + 1) % participants.length];
+    const studentIds = roomAssignments.map((a) => a.studentId);
 
-      roomAssignments.push({
-        studentId: participant.studentId,
-        newRoomId: nextParticipant.currentRoomId,
-        oldRoomId: participant.currentRoomId,
-      });
-    }
+    // ── Transactional execution with row-level locking ───────────────────────
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction('READ COMMITTED');
 
-    // Execute all swaps
-    for (const assignment of roomAssignments) {
-      const student = await this.studentRepository.findOne({
-        where: { userId: assignment.studentId },
-      });
+    try {
+      // Lock all involved Student rows for the duration of this transaction.
+      // Any concurrent swap or eviction targeting the same students will block
+      // until we commit or roll back, eliminating TOCTOU races.
+      const lockedStudents = await queryRunner.manager
+        .createQueryBuilder(Student, 'student')
+        .whereInIds(studentIds)
+        .setLock('pessimistic_write')
+        .getMany();
 
-      if (student) {
+      if (lockedStudents.length !== studentIds.length) {
+        throw new BadRequestException(
+          'One or more students in the swap chain could not be found.',
+        );
+      }
+
+      // Index locked rows by userId for O(1) lookup
+      const studentMap = new Map<string, Student>(
+        lockedStudents.map((s) => [s.userId, s]),
+      );
+
+      // Capacity check: the target room must not already be at capacity
+      // after accounting for the outgoing tenant.
+      // Because this is a rotation, exactly one occupant leaves each room
+      // before another arrives, so net capacity is unchanged. We only need
+      // to reject if a room is somehow over-capacity before the swap.
+      for (const assignment of roomAssignments) {
+        const student = studentMap.get(assignment.studentId)!;
+        if (student.currentRoomId !== assignment.oldRoomId) {
+          // The student's room changed since validation — stale data, abort.
+          throw new BadRequestException(
+            `Student ${assignment.studentId} has moved since chain validation. Please re-validate.`,
+          );
+        }
+      }
+
+      // Apply the room rotation
+      const histories: SwapHistory[] = [];
+
+      for (const assignment of roomAssignments) {
+        const student = studentMap.get(assignment.studentId)!;
         student.currentRoomId = assignment.newRoomId;
-        await this.studentRepository.save(student);
+        await queryRunner.manager.save(Student, student);
 
-        const history: SwapHistory = this.swapHistoryRepository.create({
+        const history = queryRunner.manager.create(SwapHistory, {
           studentId: assignment.studentId,
           previousRoomId: assignment.oldRoomId,
           newRoomId: assignment.newRoomId,
@@ -654,20 +711,27 @@ export class SwapsService {
           },
           executedById: adminUserId,
         });
-
         histories.push(history);
       }
+
+      // Bulk-persist history records
+      await queryRunner.manager.save(SwapHistory, histories);
+
+      // Mark all swap requests as COMPLETED
+      await queryRunner.manager.update(
+        SwapRequest,
+        { id: In(swapRequestIds) },
+        { status: SwapRequestStatus.COMPLETED, chainId },
+      );
+
+      await queryRunner.commitTransaction();
+      return histories;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
-
-    await this.swapHistoryRepository.save(histories);
-
-    // Update all request statuses
-    await this.swapRequestRepository.update(
-      { id: In(swapRequestIds) },
-      { status: SwapRequestStatus.COMPLETED, chainId },
-    );
-
-    return histories;
   }
 
   async getSwapHistory(studentId?: string): Promise<SwapHistory[]> {

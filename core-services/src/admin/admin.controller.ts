@@ -23,6 +23,9 @@ import {
 import { AdminService } from './admin.service';
 import { AllocationDataService } from '../allocation-data/allocation-data.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../entities/user.entity';
 import {
   CreateHostelDto,
   UpdateHostelDto,
@@ -42,7 +45,8 @@ import {
 
 @ApiTags('admin')
 @Controller('admin')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.WARDEN)
 @ApiBearerAuth()
 export class AdminController {
   constructor(

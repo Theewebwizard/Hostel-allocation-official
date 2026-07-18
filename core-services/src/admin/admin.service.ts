@@ -472,8 +472,13 @@ export class AdminService implements OnModuleInit {
         );
       }
 
-      // Get current rules for snapshot
-      const rules = await queryRunner.manager.find(AllocationRule);
+      // Get current rules for snapshot — ordered deterministically so Python's
+      // stable sort produces the same candidate-pruning result regardless of
+      // PostgreSQL's internal row order for equal-priority rules.
+      const rules = await queryRunner.manager.find(AllocationRule, {
+        order: { priority: 'DESC', id: 'ASC' },
+      });
+
 
       // Create allocation run record
       const run = queryRunner.manager.create(AllocationRun, {

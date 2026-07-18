@@ -91,10 +91,8 @@ Consider `Student(year: 2)`.
 * Rule 2 (Priority 150, Year: 2, Hostel: A): **Match! (Decision: ALLOW)**
 * Rule 3 (Priority 50, Year: 2, Hostel: A, Wing: North): *Not evaluated (Rule 2 already decided)*
 
-**Determinism Warning:**
-The candidate-pruning function is deterministic for a fixed ordered rule input. However, end-to-end rule resolution is not guaranteed deterministic for conflicting equal-priority rules because the TypeORM query (`queryRunner.manager.find()`) does not specify ordering and Python's stable sort preserves incoming order among equal-priority rules.
-
-If Rule A (Priority 100, ALLOW) and Rule B (Priority 100, DENY) match, the outcome is strictly dependent on the unspecified row order returned by PostgreSQL.
+**Determinism Note:**
+The candidate-pruning function is deterministic for a fixed ordered rule input. The TypeORM query that fetches rules for `triggerAllocation` now explicitly orders by `priority DESC, id ASC`, guaranteeing a stable, reproducible rule order regardless of PostgreSQL's internal row order. Equal-priority rules are therefore always resolved in insertion order (lower `id` wins).
 
 ### 3.2 Hierarchical Placement Strategy
 
@@ -196,13 +194,13 @@ Students issue direct or open swap requests, forming a directed graph where edge
 
 The engine implements **Depth-First Search (DFS)** using `visited` and recursion stack (`recStack`) sets to trace paths. When a back-edge is found in the `recStack`, a valid cycle is extracted and validated against gender and cross-hostel year constraints.
 
-### Execution Risks
+### Execution
 
-`executeSwapChain` loops over the participants, updating `Student.currentRoomId` sequentially (`await this.studentRepository.save()`) without a database transaction.
+`executeSwapChain` wraps the entire rotation inside a TypeORM `QueryRunner` transaction (`READ COMMITTED`). Before mutating any rows, it issues a `SELECT ... FOR UPDATE` (`pessimistic_write`) on all involved `Student` rows, serializing concurrent swap or eviction operations against the same students.
 
-* **Atomicity Failure / Partial Persistence:** A mid-loop failure can persist a partial assignment rotation, leaving the database in a state that no longer represents a valid execution of the original swap cycle.
-* **Invariant Violation:** Because `currentRoomId` is not unique, a partial rotation can leave one room with zero student references while another room has multiple student references. Whether this violates capacity depends on the target room's configured capacity (e.g. 2 students pointing to a 1-capacity room).
-* **Validation TOCTOU:** The chain is validated fully before the loop begins. A concurrent administrative edit between validation and iteration will result in a stale graph execution.
+* **Atomicity:** A mid-loop failure triggers `queryRunner.rollbackTransaction()`, leaving no partial assignment in the database.
+* **TOCTOU Guard:** Each locked student's `currentRoomId` is re-checked against the validated value inside the transaction. If any room has changed since validation, the transaction aborts with a `BadRequestException`.
+* **Validation TOCTOU (residual):** The chain is validated fully before acquiring locks. A concurrent administrative edit between validation and lock-acquisition is still theoretically possible but is now bounded to a much smaller window and will be detected by the stale-room guard inside the transaction.
 
 ---
 
@@ -263,12 +261,13 @@ erDiagram
 
 * Foreign key constraints heavily govern relational integrity (e.g. deleting a Hostel with Rooms fails).
 * `Student.rollNumber` is uniquely constrained.
+* **Roommate Uniqueness (Migration 1):** Two partial unique indexes on `roommate_invitations` (`senderId` WHERE `status = 'accepted'` and `receiverId` WHERE `status = 'accepted'`) guarantee that a student can appear in at most one accepted invitation row regardless of concurrent requests.
+* **Room Capacity (Migration 2):** A `BEFORE UPDATE` trigger on the `students` table (`enforce_room_capacity`) counts live occupants of the target room and raises a PostgreSQL exception if assigning the student would exceed the room's `capacity`. The check is skipped when `currentRoomId` is unchanged or set to NULL.
 
 ### Application-Enforced Invariants (Vulnerable to DB races)
 
-* **Roommate Uniqueness:** The application checks for existing `ACCEPTED` invitations before allowing a new one, but there is no schema-level check.
-* **Room Capacity:** `Student.currentRoomId` does NOT have a unique constraint, allowing capacity violations during a partial swap failure.
-* **Rule Priorities:** Equal priorities are not constrained or ordered by the schema, leading to application-level non-determinism.
+* **Roommate Uniqueness:** The application still checks for existing `ACCEPTED` invitations before allowing a new one as a fast-path guard. The schema-level partial unique indexes (Migration 1) are the authoritative enforcement.
+* **Rule Priorities:** Equal priorities are not constrained or ordered by the schema, leading to application-level non-determinism (mitigated by explicit `ORDER BY priority DESC, id ASC` on all rule queries).
 
 ---
 
@@ -294,9 +293,28 @@ HTTP POST `/admin/allocation/:id/publish` → `AdminController` → `AdminServic
 ## 10. Authentication and Authorization
 
 The API uses Passport-based JWT Authentication.
-**Request Path:** Request → `JwtAuthGuard` → JWT Validation (`JwtStrategy`) → Authenticated Principal (`req.user`) → Controller.
+**Request Path:** Request → `JwtAuthGuard` → JWT Validation (`JwtStrategy`) → Authenticated Principal (`req.user`) → `RolesGuard` → Controller.
 
-Controller-level inspection shows authentication guards but no explicit role guard on these routes. Service-level inspection also reveals no explicit administrative role validation. This is an authorization gap and a broken access-control risk; frontend route restrictions alone would not constitute a server-side authorization boundary. This represents a significant risk for high-impact actions like triggering allocations and executing swap chains.
+### RolesGuard
+
+`RolesGuard` (`src/auth/roles.guard.ts`) implements `CanActivate` and runs after `JwtAuthGuard` (so `req.user` is always populated). It reads the `@Roles()` decorator metadata via NestJS `Reflector.getAllAndOverride` (handler-level takes precedence over class-level) and compares the required roles against `req.user.role`.
+
+- If no `@Roles()` is present → guard is a **no-op** (any authenticated user passes).
+- If `@Roles(UserRole.WARDEN)` is present and `req.user.role !== 'warden'` → throws `403 ForbiddenException`.
+
+### Applied Protections
+
+| Controller | Scope | Required Role |
+|---|---|---|
+| `AdminController` | Entire class (`@Roles` at class level) | `UserRole.WARDEN` |
+| `AdminController` `POST /admin/allocation/webhook/:run_id` | Override via `@UseGuards()` | None (uses `X-Webhook-Secret`) |
+| `AdminController` `GET /admin/policy` | Override via `@UseGuards()` | None (public) |
+| `SwapsController` student endpoints | No `@Roles` | Any authenticated user |
+| `SwapsController` `GET /admin/all` | `@Roles` at method level | `UserRole.WARDEN` |
+| `SwapsController` `GET /admin/cycles` | `@Roles` at method level | `UserRole.WARDEN` |
+| `SwapsController` `POST /admin/execute/:id` | `@Roles` at method level | `UserRole.WARDEN` |
+| `SwapsController` `POST /admin/execute-chain` | `@Roles` at method level | `UserRole.WARDEN` |
+| `SwapsController` `GET /admin/history` | `@Roles` at method level | `UserRole.WARDEN` |
 
 ---
 
@@ -393,14 +411,24 @@ The NestJS API is largely backed by PostgreSQL for domain state, but allocation 
 
 ## 16. Technical Roadmap
 
-### P0 — Data Integrity
+### P0 — Data Integrity ✅ Implemented
 
-* Transactional Swap Execution: Wrap `executeSwapChain` in `dataSource.transaction`.
-* Database-Level Roommate Invariant: Move accepted roommate relationships to a schema that enforces unique student participation in at most one active pair, rather than relying only on service-level invitation checks.
+* ~~Transactional Swap Execution~~ **Done:** `executeSwapChain` and `executeDirectSwap` now use TypeORM `QueryRunner` transactions with `READ COMMITTED` isolation and `pessimistic_write` row-level locking. A stale-room guard inside the transaction aborts on TOCTOU conflicts.
+* ~~Database-Level Roommate Invariant~~ **Done (Migration 1):** Two partial unique indexes on `roommate_invitations` enforce one-accepted-invitation-per-student at the schema level.
+* **Bonus — Room Capacity (Migration 2):** A `BEFORE UPDATE` trigger on `students` enforces room capacity at the PostgreSQL level, replacing the former application-only check.
 
-### P1 — Determinism
+**Running migrations:**
+```bash
+# From core-services/
+npm run migration:run
 
-* Explicit Secondary Rule Ordering: Add an `ORDER BY id ASC` clause to the TypeORM query fetching rules to resolve equal-priority conflicts predictably.
+# To undo the last migration:
+npm run migration:revert
+```
+
+### P1 — Determinism ✅ Implemented
+
+* ~~Explicit Secondary Rule Ordering~~ **Done:** The `triggerAllocation` query now uses `ORDER BY priority DESC, id ASC`. Equal-priority rules are always resolved in insertion order, eliminating non-determinism from PostgreSQL's unspecified row return order.
 
 ### P2 — Orchestration Durability ✅ Implemented
 

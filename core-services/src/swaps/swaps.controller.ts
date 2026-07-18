@@ -17,6 +17,9 @@ import {
 } from '@nestjs/swagger';
 import { SwapsService } from './swaps.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../entities/user.entity';
 import {
   CreateSwapRequestDto,
   RespondSwapRequestDto,
@@ -25,7 +28,7 @@ import {
 
 @ApiTags('swaps')
 @Controller('swaps')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class SwapsController {
   constructor(private readonly swapsService: SwapsService) {}
@@ -93,39 +96,49 @@ export class SwapsController {
   // ============ ADMIN ENDPOINTS ============
 
   @Get('admin/all')
+  @Roles(UserRole.WARDEN)
   @ApiOperation({ summary: 'Get all swap requests (admin)' })
   @ApiResponse({ status: 200, description: 'All swap requests' })
+  @ApiResponse({ status: 403, description: 'Wardens only' })
   async getAllSwapRequests() {
     return this.swapsService.getAllSwapRequests();
   }
 
   @Get('admin/cycles')
+  @Roles(UserRole.WARDEN)
   @ApiOperation({ summary: 'Detect swap cycles (admin)' })
   @ApiResponse({ status: 200, description: 'Detected cycles' })
+  @ApiResponse({ status: 403, description: 'Wardens only' })
   async detectCycles() {
     return this.swapsService.detectSwapCycles();
   }
 
   @Post('admin/execute/:id')
+  @Roles(UserRole.WARDEN)
   @ApiOperation({ summary: 'Execute a direct swap (admin)' })
   @ApiResponse({ status: 200, description: 'Swap executed' })
   @ApiResponse({ status: 400, description: 'Swap not ready for execution' })
+  @ApiResponse({ status: 403, description: 'Wardens only' })
   @ApiResponse({ status: 404, description: 'Request not found' })
   async executeDirectSwap(@Request() req, @Param('id') id: string) {
     return this.swapsService.executeDirectSwap(req.user.id, parseInt(id));
   }
 
   @Post('admin/execute-chain')
+  @Roles(UserRole.WARDEN)
   @ApiOperation({ summary: 'Execute a swap chain (admin)' })
   @ApiResponse({ status: 200, description: 'Chain executed' })
   @ApiResponse({ status: 400, description: 'Chain validation failed' })
+  @ApiResponse({ status: 403, description: 'Wardens only' })
   async executeSwapChain(@Request() req, @Body() dto: ExecuteSwapChainDto) {
     return this.swapsService.executeSwapChain(req.user.id, dto.swapRequestIds);
   }
 
   @Get('admin/history')
+  @Roles(UserRole.WARDEN)
   @ApiOperation({ summary: 'Get all swap history (admin)' })
   @ApiResponse({ status: 200, description: 'All swap history' })
+  @ApiResponse({ status: 403, description: 'Wardens only' })
   async getAllSwapHistory() {
     return this.swapsService.getSwapHistory();
   }
