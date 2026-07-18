@@ -63,6 +63,9 @@ export class AllocationRun {
   finalized: boolean;
 
   @Column({ type: 'jsonb', nullable: true })
+  metrics: Record<string, number> | null;
+
+  @Column({ type: 'jsonb', nullable: true })
   targetYears: number[] | null;
 
   @Column({ type: 'jsonb', nullable: true })

@@ -6,6 +6,7 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 import { Student } from './student.entity';
 import { Group } from './group.entity';
@@ -18,6 +19,8 @@ export enum RoommateInvitationStatus {
 }
 
 @Entity('roommate_invitations')
+@Index('UQ_roommate_invitations_sender_accepted', ['senderId'], { unique: true, where: "status = 'accepted'" })
+@Index('UQ_roommate_invitations_receiver_accepted', ['receiverId'], { unique: true, where: "status = 'accepted'" })
 export class RoommateInvitation {
   @PrimaryGeneratedColumn()
   id: number;

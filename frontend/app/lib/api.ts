@@ -205,7 +205,7 @@ export interface AllocationRule {
 export interface AllocationRun {
   id: string;
   status: "queued" | "running" | "completed" | "failed";
-  allocationMode?: "group_based" | "fcfs" | "wing_fcfs";
+  allocationMode?: "group_based" | "fcfs" | "wing_fcfs" | "global_optimization";
   totalStudents: number;
   allocatedStudents: number;
   averageHappiness: number;
@@ -213,6 +213,7 @@ export interface AllocationRun {
   endTime?: string;
   errorMessage?: string;
   finalized?: boolean;
+  metrics?: Record<string, number>;
 }
 
 export interface AllocationResult {

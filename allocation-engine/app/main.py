@@ -161,12 +161,41 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
 
         results = engine.run_allocation(mode=request.allocation_mode)
 
+        # Quality Metrics Calculation
+        total_students = len(filtered_students)
+        allocated_students = len([r for r in results if r.room_id is not None])
+        unallocated_students = total_students - allocated_students
+        
+        group_splits = 0
+        filtered_student_ids = {s.user_id for s in filtered_students}
+        # Map student -> outcome tuple for easy lookup
+        student_outcomes = {}
+        for r in results:
+            if r.room_id is not None:
+                student_outcomes[r.student_id] = (r.hostel_name, r.wing)
+            else:
+                student_outcomes[r.student_id] = None
+        
+        for group in data["groups"]:
+            # Only consider members that are part of the current allocation run
+            active_members = [m.user_id for m in group.members if m.user_id in filtered_student_ids]
+            if len(active_members) > 1:
+                unique_outcomes = {student_outcomes.get(m_id) for m_id in active_members if m_id in student_outcomes}
+                # If everyone is unallocated (unique_outcomes == {None}), it's NOT a split.
+                if len(unique_outcomes) > 1:
+                    group_splits += 1
+
+        metrics = {
+            "unallocated_students": unallocated_students,
+            "group_splits": group_splits
+        }
+
         allocation_runs[run_id].update({
             "status": "completed",
             "results": results,
             "decision_logs": engine.decision_logs,
-            "total_students": len(filtered_students),
-            "allocated_students": len([r for r in results if r.room_id is not None])
+            "total_students": total_students,
+            "allocated_students": allocated_students
         })
 
         # Fire webhook to NestJS if a callback URL was provided
@@ -181,6 +210,7 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
                     log.model_dump() if hasattr(log, "model_dump") else log
                     for log in engine.decision_logs
                 ],
+                "metrics": metrics
             }
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:

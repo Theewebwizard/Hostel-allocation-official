@@ -123,3 +123,5 @@ class AllocationResponse(BaseModel):
     allocated_students: int
     allocations: List[AllocationResult]
     decision_logs: List[AllocationDecisionLog] = []
+    metrics: Dict[str, int] = {}
+

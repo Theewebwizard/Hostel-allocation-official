@@ -622,6 +622,7 @@ export class AdminService implements OnModuleInit {
         undefined,
         payload.total_students,
         payload.allocated_students,
+        payload.metrics,
       );
       return { message: 'Allocation results persisted successfully.' };
     }
@@ -677,6 +678,7 @@ export class AdminService implements OnModuleInit {
     errorMessage?: string,
     totalStudents?: number,
     allocatedStudents?: number,
+    metrics?: Record<string, number>,
   ): Promise<void> {
     const run = await this.runRepository.findOne({ where: { id: runId } });
     if (run) {
@@ -685,6 +687,8 @@ export class AdminService implements OnModuleInit {
       if (totalStudents !== undefined) run.totalStudents = totalStudents;
       if (allocatedStudents !== undefined)
         run.allocatedStudents = allocatedStudents;
+      if (metrics !== undefined) run.metrics = metrics;
+      
       if (
         status === AllocationRunStatus.COMPLETED ||
         status === AllocationRunStatus.FAILED
@@ -692,6 +696,17 @@ export class AdminService implements OnModuleInit {
         run.endTime = new Date();
       }
       await this.runRepository.save(run);
+
+      // Log metrics if run just completed
+      if (status === AllocationRunStatus.COMPLETED && metrics) {
+        this.logger.log(
+          `[Allocation] Run ${runId} Quality Metrics:\n` +
+          `  - Total Students: ${run.totalStudents}\n` +
+          `  - Allocated: ${run.allocatedStudents}\n` +
+          `  - Unallocated: ${metrics.unallocated_students ?? 0}\n` +
+          `  - Group Splits: ${metrics.group_splits ?? 0}`
+        );
+      }
     }
   }
 

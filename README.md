@@ -299,13 +299,13 @@ The API uses Passport-based JWT Authentication.
 
 `RolesGuard` (`src/auth/roles.guard.ts`) implements `CanActivate` and runs after `JwtAuthGuard` (so `req.user` is always populated). It reads the `@Roles()` decorator metadata via NestJS `Reflector.getAllAndOverride` (handler-level takes precedence over class-level) and compares the required roles against `req.user.role`.
 
-- If no `@Roles()` is present → guard is a **no-op** (any authenticated user passes).
-- If `@Roles(UserRole.WARDEN)` is present and `req.user.role !== 'warden'` → throws `403 ForbiddenException`.
+* If no `@Roles()` is present → guard is a **no-op** (any authenticated user passes).
+* If `@Roles(UserRole.WARDEN)` is present and `req.user.role !== 'warden'` → throws `403 ForbiddenException`.
 
 ### Applied Protections
 
 | Controller | Scope | Required Role |
-|---|---|---|
+| --- | --- | --- |
 | `AdminController` | Entire class (`@Roles` at class level) | `UserRole.WARDEN` |
 | `AdminController` `POST /admin/allocation/webhook/:run_id` | Override via `@UseGuards()` | None (uses `X-Webhook-Secret`) |
 | `AdminController` `GET /admin/policy` | Override via `@UseGuards()` | None (public) |
@@ -418,6 +418,7 @@ The NestJS API is largely backed by PostgreSQL for domain state, but allocation 
 * **Bonus — Room Capacity (Migration 2):** A `BEFORE UPDATE` trigger on `students` enforces room capacity at the PostgreSQL level, replacing the former application-only check.
 
 **Running migrations:**
+
 ```bash
 # From core-services/
 npm run migration:run
@@ -435,6 +436,6 @@ npm run migration:revert
 * ~~Startup Reconciliation~~ **Done:** `AdminService.onModuleInit()` scans for `QUEUED`/`RUNNING` runs on startup and reconciles against the Python engine's in-memory state.
 * ~~In-memory polling~~ **Done:** Replaced the `setTimeout` polling loop with a webhook push model. Python POSTs results to `POST /admin/allocation/webhook/:run_id` (secured with `X-Webhook-Secret`) on completion or failure.
 
-### P3 — Allocation Quality
+### P3 — Allocation Quality ✅ Implemented
 
-* Measurement: Measure and log group split counts and unallocated student counts systematically.
+* ~~Measurement~~ **Done:** The Python engine calculates `unallocated_students` and `group_splits` (defined as group members assigned to >1 unique `(hostel, wing)` combinations, excluding fully unallocated groups). NestJS persists these within a JSONB `metrics` column on the `AllocationRun` and outputs them via the logger upon run completion.
