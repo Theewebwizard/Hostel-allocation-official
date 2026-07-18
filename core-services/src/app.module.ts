@@ -62,6 +62,8 @@ import { RoommateInvitationsModule } from './roommate-invitations/roommate-invit
           AdministrativeAction,
         ],
         synchronize: configService.get('NODE_ENV') === 'development', // Auto-sync in dev only
+        migrations: [__dirname + '/migrations/*.{ts,js}'],
+        migrationsRun: true,
       }),
       inject: [ConfigService],
     }),

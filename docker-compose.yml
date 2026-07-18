@@ -8,15 +8,70 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: hostel_allocation
-    ports:
-      - "5433:5432"
+    # Do not expose postgres port to host machine
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - hostel_net
+
+  allocation-engine:
+    build:
+      context: ./allocation-engine
+      dockerfile: Dockerfile
+    container_name: hostel_allocation_engine
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-super_secret_webhook_token_2026}
+      CORE_SERVICES_URL: http://core-services:3000
+    # Do not expose allocation-engine port to host machine
+    depends_on:
+      - postgres
+    networks:
+      - hostel_net
+
+  core-services:
+    build:
+      context: ./core-services
+      dockerfile: Dockerfile
+    container_name: hostel_allocation_api
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: hostel_allocation
+      JWT_SECRET: ${JWT_SECRET:-jwt_secret_token_default_value}
+      ALLOCATION_ENGINE_URL: http://allocation-engine:8000
+      CORE_SERVICES_BASE_URL: http://core-services:3000
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-super_secret_webhook_token_2026}
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - hostel_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hostel_allocation_web
+    ports:
+      - "80:80"
+    depends_on:
+      - core-services
+    networks:
+      - hostel_net
 
 volumes:
   postgres_data:
+
+networks:
+  hostel_net:
+    driver: bridge
