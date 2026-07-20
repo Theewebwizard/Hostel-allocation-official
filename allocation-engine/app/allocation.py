@@ -847,16 +847,65 @@ class AllocationEngine:
         valid_rooms_cache = {}
         
         # Dynamic Objective Scaling for Lexicographical Dominance
+        #
+        # The CP-SAT objective is designed so that:
+        #
+        #   W_bed  ≫  W_rule  ≫  W_pref
+        #
+        # where each tier strictly dominates the tier below:
+        #
+        #   W_bed  : Base score awarded for any room assignment (securing a bed).
+        #            Must exceed the maximum total bonus any student can accumulate
+        #            from rule priority + preference alignment combined.
+        #
+        #   W_rule : Weight applied to a room's matching rule priority.
+        #            Must exceed the maximum contribution of W_pref across all
+        #            preference positions (pref_length terms at W_pref each).
+        #
+        #   W_pref : Weight applied to the student's preference ordering.
+        #            Lowest-tier bonus; ensures preference tie-breaking never
+        #            overrides a rule priority difference.
+        #
+        # Concretely for each student–room pair:
+        #   score = W_base + (W_rule × rule_priority) + (W_pref × (pref_len − pref_idx))
+        #
+        # Dominance proof:
+        #   W_base > N × (W_rule × max_rule_priority + W_pref × max_pref_length)
+        #   ⟹ giving ANY student a bed (even sub-optimal) always beats the best
+        #      bonus that could be earned by leaving a student unallocated.
+        #   W_rule × 1 > W_pref × max_pref_length
+        #   ⟹ a 1-unit improvement in rule priority beats the maximum possible
+        #      preference bonus, so rule alignment is never traded for preferences.
         W_rule = 1000
         W_pref = 10
-        
+
         max_rule_priority = max([r.priority for r in self.rules]) if self.rules else 0
         max_pref_length = max([len(getattr(s, 'hostel_preferences', [])) for s in self.students.values()]) if self.students else 0
-        
+
         max_possible_bonus = (W_rule * max_rule_priority) + (W_pref * max_pref_length)
         total_students = len(self.students)
         W_base = (total_students * max_possible_bonus) + 1_000_000
-        
+
+        # ── Runtime dominance assertion ──────────────────────────────────────
+        # W_rule ≫ W_pref: one step up in rule priority must outweigh the
+        # maximum preference contribution any student can receive.
+        _max_pref_contribution = W_pref * max(max_pref_length, 1)
+        assert W_rule > _max_pref_contribution, (
+            f"CP-SAT dominance violated: W_rule ({W_rule}) must be strictly greater than "
+            f"W_pref × max_pref_length ({W_pref} × {max_pref_length} = {_max_pref_contribution}). "
+            "Increase W_rule or reduce preference list length."
+        )
+
+        # W_base ≫ N × max_bonus: getting any bed must dominate the maximum
+        # possible rule+pref bonus for all students combined.
+        _max_total_bonus = total_students * max_possible_bonus
+        assert W_base > _max_total_bonus, (
+            f"CP-SAT dominance violated: W_base ({W_base}) must be strictly greater than "
+            f"N × max_bonus ({total_students} × {max_possible_bonus} = {_max_total_bonus}). "
+            "This should never occur given the W_base formula; check for integer overflow."
+        )
+        # ── End dominance assertion ──────────────────────────────────────────
+
         # Prune and Instantiate variables
         for s_id, student in self.students.items():
             if s_id in state.student_allocations:

@@ -19,6 +19,21 @@ services:
     networks:
       - hostel_net
 
+  redis:
+    image: redis:7-alpine
+    container_name: hostel_allocation_redis
+    # Fully ephemeral — no disk persistence. Orphaned allocation runs are
+    # reconciled automatically by AdminService.onModuleInit() on NestJS startup
+    # (HTTP 404 from Python engine → run marked FAILED in PostgreSQL).
+    # Internal service-to-service only; port not exposed to host.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hostel_net
+
   allocation-engine:
     build:
       context: ./allocation-engine
@@ -27,9 +42,14 @@ services:
     environment:
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-super_secret_webhook_token_2026}
       CORE_SERVICES_URL: http://core-services:3000
+      # Redis connection for stateless allocation run state storage
+      REDIS_URL: redis://redis:6379/0
     # Do not expose allocation-engine port to host machine
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - hostel_net
 
@@ -75,3 +95,4 @@ volumes:
 networks:
   hostel_net:
     driver: bridge
+

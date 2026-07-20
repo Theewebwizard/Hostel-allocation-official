@@ -1,3 +1,17 @@
+"""
+Hostel Allocation Engine — FastAPI Application
+
+Allocation run state is persisted in Redis (key: ``run:{run_id}``, TTL: 24 h)
+instead of an in-process dictionary.  This makes the service stateless and
+safe to run under multiple worker processes or replicas.
+
+On ``GET /allocation/{run_id}`` a 404 is returned if the Redis key is absent,
+which NestJS's ``onModuleInit`` reconciliation interprets as a lost run and
+marks it FAILED.
+"""
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -7,13 +21,35 @@ from typing import Dict, Any
 from .config import get_settings
 from .models import AllocationRequest, AllocationResponse, AllocationResult
 from .allocation import AllocationEngine
+from .queue import (
+    get_redis_client,
+    close_redis_client,
+    set_run_state,
+    get_run_state,
+    update_run_state,
+    delete_run_state,
+)
 
 settings = get_settings()
+
+
+# ─── Lifespan ─────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialise Redis on startup and drain the connection pool on shutdown."""
+    await get_redis_client()          # eagerly connect so the first request is fast
+    yield
+    await close_redis_client()
+
+
+# ─── App ──────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Hostel Allocation Engine",
     description="Python-based intelligent hostel room allocation using CSP + Bin Packing",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS
@@ -25,15 +61,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory storage for allocation runs (in production, use database)
-allocation_runs: Dict[str, Dict[str, Any]] = {}
 
+# ─── Health ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "allocation-engine"}
 
+
+# ─── Data Fetching ────────────────────────────────────────────────────────────
 
 async def fetch_data_from_core_services():
     """Fetch students, groups, hostels, and rooms from core services"""
@@ -133,10 +170,12 @@ async def fetch_data_from_core_services():
             raise HTTPException(status_code=500, detail=f"Failed to process data: {str(e)}")
 
 
+# ─── Background Task ──────────────────────────────────────────────────────────
+
 async def run_allocation_task(run_id: str, request: AllocationRequest, callback_url: str | None):
     """Background task to run allocation"""
     try:
-        allocation_runs[run_id]["status"] = "running"
+        await update_run_state(run_id, {"status": "running"})
 
         # Fetch data from core services
         data = await fetch_data_from_core_services()
@@ -165,7 +204,7 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
         total_students = len(filtered_students)
         allocated_students = len([r for r in results if r.room_id is not None])
         unallocated_students = total_students - allocated_students
-        
+
         group_splits = 0
         filtered_student_ids = {s.user_id for s in filtered_students}
         # Map student -> outcome tuple for easy lookup
@@ -175,7 +214,7 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
                 student_outcomes[r.student_id] = (r.hostel_name, r.wing)
             else:
                 student_outcomes[r.student_id] = None
-        
+
         for group in data["groups"]:
             # Only consider members that are part of the current allocation run
             active_members = [m.user_id for m in group.members if m.user_id in filtered_student_ids]
@@ -190,27 +229,30 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
             "group_splits": group_splits
         }
 
-        allocation_runs[run_id].update({
+        # Persist terminal state to Redis (results stored as plain dicts for serialisation)
+        await update_run_state(run_id, {
             "status": "completed",
-            "results": results,
-            "decision_logs": engine.decision_logs,
+            "results": [r.model_dump() for r in results],
+            "decision_logs": [
+                log.model_dump() if hasattr(log, "model_dump") else log
+                for log in engine.decision_logs
+            ],
             "total_students": total_students,
-            "allocated_students": allocated_students
+            "allocated_students": allocated_students,
+            "metrics": metrics,
         })
 
         # Fire webhook to NestJS if a callback URL was provided
         if callback_url:
+            run_state = await get_run_state(run_id)
             payload = {
                 "run_id": run_id,
                 "status": "completed",
-                "total_students": allocation_runs[run_id]["total_students"],
-                "allocated_students": allocation_runs[run_id]["allocated_students"],
-                "allocations": [r.model_dump() for r in results],
-                "decision_logs": [
-                    log.model_dump() if hasattr(log, "model_dump") else log
-                    for log in engine.decision_logs
-                ],
-                "metrics": metrics
+                "total_students": run_state["total_students"],
+                "allocated_students": run_state["allocated_students"],
+                "allocations": run_state["results"],
+                "decision_logs": run_state["decision_logs"],
+                "metrics": metrics,
             }
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
@@ -219,8 +261,11 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
                         json=payload,
                         headers={"X-Webhook-Secret": settings.webhook_secret},
                     )
+                # Clean up Redis key now that NestJS has the results
+                await delete_run_state(run_id)
             except Exception as cb_err:
                 print(f"[Webhook] Failed to POST to {callback_url}: {cb_err}")
+                # Do NOT delete the key — NestJS reconciliation will poll /allocation/{run_id}
 
     except Exception as e:
         import traceback
@@ -229,9 +274,9 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
         with open("engine_error.log", "a") as f:
             f.write(error_msg + "\n")
 
-        allocation_runs[run_id].update({
+        await update_run_state(run_id, {
             "status": "failed",
-            "error": str(e)
+            "error": str(e),
         })
 
         # Fire failure webhook so NestJS can mark the run FAILED immediately
@@ -252,28 +297,35 @@ async def run_allocation_task(run_id: str, request: AllocationRequest, callback_
                         json=payload,
                         headers={"X-Webhook-Secret": settings.webhook_secret},
                     )
+                # Key can be cleaned up — NestJS received the failure
+                await delete_run_state(run_id)
             except Exception as cb_err:
                 print(f"[Webhook] Failed to POST failure callback to {callback_url}: {cb_err}")
 
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.post("/allocate", response_model=dict)
 async def trigger_allocation(request: AllocationRequest, background_tasks: BackgroundTasks):
     """
     Trigger a new allocation run
-    
+
     This endpoint starts the allocation process in the background
-    and returns a run_id to check the status
+    and returns a run_id to check the status.
     """
     run_id = request.allocation_run_id or str(uuid.uuid4())
-    
-    allocation_runs[run_id] = {
+
+    # Initialise run state in Redis before starting background task so that
+    # GET /allocation/{run_id} never races with "key not yet created".
+    await set_run_state(run_id, {
         "status": "queued",
         "results": [],
         "decision_logs": [],
         "total_students": 0,
-        "allocated_students": 0
-    }
-    
+        "allocated_students": 0,
+        "metrics": {},
+    })
+
     # Run allocation in background; callback_url receives results via webhook push
     background_tasks.add_task(
         run_allocation_task,
@@ -281,21 +333,31 @@ async def trigger_allocation(request: AllocationRequest, background_tasks: Backg
         request,
         request.callback_url,
     )
-    
+
     return {
         "run_id": run_id,
         "status": "queued",
-        "message": "Allocation process started"
+        "message": "Allocation process started",
     }
 
 
 @app.get("/allocation/{run_id}", response_model=AllocationResponse)
 async def get_allocation_result(run_id: str):
-    """Get the result of an allocation run"""
-    if run_id not in allocation_runs:
-        raise HTTPException(status_code=404, detail="Allocation run not found")
+    """
+    Get the result of an allocation run.
 
-    run = allocation_runs[run_id]
+    Returns HTTP 404 if the run is unknown (key expired or never created).
+    NestJS's onModuleInit reconciliation treats this as a lost run and marks
+    it FAILED.
+    """
+    run = await get_run_state(run_id)
+
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Allocation run '{run_id}' not found. "
+                   "The run may have expired (>24 h) or was never created on this engine instance.",
+        )
 
     return AllocationResponse(
         run_id=run_id,
@@ -303,7 +365,8 @@ async def get_allocation_result(run_id: str):
         total_students=run.get("total_students", 0),
         allocated_students=run.get("allocated_students", 0),
         allocations=run.get("results", []),
-        decision_logs=run.get("decision_logs", [])
+        decision_logs=run.get("decision_logs", []),
+        metrics=run.get("metrics", {}),
     )
 
 
@@ -314,5 +377,5 @@ async def root():
         "name": "Hostel Allocation Engine",
         "version": "1.0.0",
         "docs": "/docs",
-        "health": "/health"
+        "health": "/health",
     }

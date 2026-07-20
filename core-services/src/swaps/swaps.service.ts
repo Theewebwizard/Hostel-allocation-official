@@ -506,55 +506,35 @@ export class SwapsService {
       );
     }
 
-    const request = await this.swapRequestRepository.findOne({
-      where: { id: requestId },
-      relations: ['requester', 'targetStudent'],
-    });
-
-    if (!request) {
-      throw new NotFoundException('Swap request not found');
-    }
-
-    if (request.status !== SwapRequestStatus.ACCEPTED) {
-      throw new BadRequestException('Swap request must be accepted first');
-    }
-
-    if (!request.targetStudentId) {
-      throw new BadRequestException('Direct swap requires a target student');
-    }
-
-    // Get both students
-    const requester = await this.studentRepository.findOne({
-      where: { userId: request.requesterId },
-    });
-    const target = await this.studentRepository.findOne({
-      where: { userId: request.targetStudentId },
-    });
-
-    if (!requester || !target) {
-      throw new NotFoundException('One or both students not found');
-    }
-
-    const requesterOldRoom = requester.currentRoomId;
-    const targetOldRoom = target.currentRoomId;
-
-    if (requesterOldRoom === null || targetOldRoom === null) {
-      throw new BadRequestException('Both students must have rooms assigned to execute a swap');
-    }
-
     // ── Transactional execution with row-level locking ────────────────────────
-    // The capacity trigger fires BEFORE UPDATE on each student row.
-    // Without a transaction, a trigger rejection on the second save would leave
-    // the first student's room already mutated with no rollback.
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction('READ COMMITTED');
 
     try {
-      // Lock both rows — prevents concurrent swaps on the same students
+      // 1. Lock SwapRequest row to prevent concurrent execution race conditions
+      const request = await queryRunner.manager
+        .createQueryBuilder(SwapRequest, 'sr')
+        .where('sr.id = :id', { id: requestId })
+        .setLock('pessimistic_write')
+        .getOne();
+
+      if (!request) {
+        throw new NotFoundException('Swap request not found');
+      }
+
+      if (request.status !== SwapRequestStatus.ACCEPTED) {
+        throw new BadRequestException('Swap request must be accepted first');
+      }
+
+      if (!request.targetStudentId) {
+        throw new BadRequestException('Direct swap requires a target student');
+      }
+
+      // 2. Lock both student rows — prevents concurrent swaps on the same students
       const locked = await queryRunner.manager
         .createQueryBuilder(Student, 'student')
-        .whereInIds([requester.userId, target.userId])
+        .whereInIds([request.requesterId, request.targetStudentId])
         .setLock('pessimistic_write')
         .getMany();
 
@@ -562,15 +542,25 @@ export class SwapsService {
         throw new NotFoundException('One or both students could not be locked for update.');
       }
 
-      const lockedRequester = locked.find((s) => s.userId === requester.userId)!;
-      const lockedTarget = locked.find((s) => s.userId === target.userId)!;
+      const lockedRequester = locked.find((s) => s.userId === request.requesterId)!;
+      const lockedTarget = locked.find((s) => s.userId === request.targetStudentId)!;
 
-      // Swap rooms
-      lockedRequester.currentRoomId = targetOldRoom;
-      lockedTarget.currentRoomId = requesterOldRoom;
+      const requesterOldRoom = lockedRequester.currentRoomId;
+      const targetOldRoom = lockedTarget.currentRoomId;
 
+      if (requesterOldRoom === null || targetOldRoom === null) {
+        throw new BadRequestException('Both students must have rooms assigned to execute a swap');
+      }
+
+      // Swap rooms: vacate requester first within transaction to avoid capacity trigger collision
+      lockedRequester.currentRoomId = null;
       await queryRunner.manager.save(Student, lockedRequester);
+
+      lockedTarget.currentRoomId = requesterOldRoom;
       await queryRunner.manager.save(Student, lockedTarget);
+
+      lockedRequester.currentRoomId = targetOldRoom;
+      await queryRunner.manager.save(Student, lockedRequester);
 
       // Create history records
       const histories: SwapHistory[] = [

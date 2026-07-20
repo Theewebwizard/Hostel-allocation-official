@@ -2,7 +2,7 @@
 
 A two-stage, heuristic-based automated room allocation engine designed to resolve large-scale student placement across multiple hostels, satisfying prioritized administrative rules, group cohesion preferences, and atomic roommate constraints.
 
-The system is split into a robust administrative REST API (NestJS) and an asynchronous, in-memory allocation orchestrator (FastAPI).
+The system is split into a robust administrative REST API (NestJS) and an asynchronous, **stateless** allocation orchestrator (FastAPI). Allocation run lifecycle state is persisted in **Redis** (24 h TTL) rather than process memory, making the engine safe to run under multiple workers or replicas.
 
 ---
 
@@ -64,7 +64,7 @@ graph TD
 ### Boundary Definitions
 
 * **Core API (NestJS):** Owns persistent domain state (Students, Rooms, Rules, Results). Provides transactional integrity for administrative commits and handles user workflows.
-* **Allocation Engine (Python):** Owns ephemeral execution state. Operates over a hydrated in-memory context, so candidate-pruning and packing inner loops do not perform database round trips.
+* **Allocation Engine (Python):** Owns **ephemeral** execution state. Run lifecycle (`queued` → `running` → `completed`) is persisted in Redis rather than process memory, so candidate-pruning and packing inner loops still operate on local memory without DB round trips — but state survives worker restarts.
 
 ---
 
@@ -176,13 +176,13 @@ sequenceDiagram
 The allocation workflow depends on two related state machines.
 
 1. **Persistent orchestration state:** PostgreSQL / NestJS `AllocationRun` (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`).
-2. **Ephemeral execution state:** Python `allocation_runs` in-memory dictionary.
+2. **Ephemeral execution state:** Redis key `run:{run_id}` (TTL: 24 h) managed by `allocation-engine/app/queue.py`.
 
-**Webhook Push Model:** When Python finishes (success or failure), it POSTs results to `POST /admin/allocation/webhook/:run_id` on NestJS with a shared `X-Webhook-Secret` header. NestJS validates the secret, persists the results, and transitions the run to `COMPLETED` or `FAILED`.
+**Webhook Push Model:** When Python finishes (success or failure), it POSTs results to `POST /admin/allocation/webhook/:run_id` on NestJS with a shared `X-Webhook-Secret` header. NestJS validates the secret, persists the results, and transitions the run to `COMPLETED` or `FAILED`. After a successful webhook delivery, the Redis key is immediately deleted.
 
-**Startup Reconciliation:** `AdminService.onModuleInit()` queries the database for any `QUEUED` or `RUNNING` runs on every NestJS startup. For each stale run, it calls `GET /allocation/{run_id}` on Python. If Python returns 404 (run is lost from memory), the run is immediately marked `FAILED`. If Python returns a terminal status, results are saved accordingly. This eliminates permanently orphaned runs caused by process restarts.
+**Startup Reconciliation:** `AdminService.onModuleInit()` queries the database for any `QUEUED` or `RUNNING` runs on every NestJS startup. For each stale run, it calls `GET /allocation/{run_id}` on Python. If Python returns 404 (Redis key expired or engine restarted), the run is immediately marked `FAILED`. If Python returns a terminal status, results are saved accordingly. This eliminates permanently orphaned runs caused by process restarts.
 
-If Python crashes or restarts, its in-memory state clears. The startup reconciliation hook will detect the 404 on the next NestJS start and mark the run `FAILED`.
+If Python crashes, restarts, or Redis restarts, the Redis key is gone. The startup reconciliation hook will detect the 404 on the next NestJS start and mark the run `FAILED`.
 
 ---
 
@@ -332,17 +332,25 @@ The API uses Passport-based JWT Authentication.
 
 ## 12. Testing and Verification
 
-**What the Repository Tests:**
-The repository currently lacks a formalized, comprehensive test suite in the provided context structure. Minimal default unit tests (e.g. `app.controller.spec.ts`) exist.
+### End-to-End Concurrency & Invariant Test Suite
 
-**What the Repository Does Not Yet Prove:**
-There is **no automated coverage** verifying:
+A comprehensive E2E test suite (`core-services/test/concurrency-and-invariants.e2e-spec.ts`) bootstraps the full `AppModule` against a live PostgreSQL database and validates four critical system properties:
 
-* Roommate atomicity guarantees under stress.
-* Locked assignment preservation.
-* Deterministic handling of equal-priority rule conflicts.
-* Concurrent swap mutation safety.
-* Orchestrator restart recovery.
+| Test | What it proves |
+| --- | --- |
+| **T1.1 — Room Capacity Trigger** | `enforce_room_capacity` PostgreSQL `BEFORE UPDATE` trigger correctly blocks a 3rd assignment to a capacity-2 room and surfaces a `QueryFailedError` with an `'at full capacity'` message. |
+| **T1.2 — Roommate Invitation Uniqueness** | `UQ_roommate_invitations_sender_accepted` and `UQ_roommate_invitations_receiver_accepted` partial indexes prevent a student from holding two accepted invitations simultaneously. |
+| **T1.3 — Concurrent Swap Lock** | `SwapsService.executeDirectSwap` with `pessimistic_write` locking allows exactly 1 of 5 concurrent calls to succeed; all others fail safely with no dirty reads or partial state. |
+| **T1.4 — Snapshot Integrity** | `AdminService.publishAndCommitRun` captures the pre-mutation student state in `AdministrativeAction.snapshot` JSONB before any room assignments are written. |
+
+**Run the suite:**
+
+```bash
+cd core-services
+npm run test:e2e concurrency-and-invariants
+```
+
+**No external services required** beyond a live PostgreSQL instance: `global.fetch` is mocked in `beforeAll` so no Python engine or Redis connection is needed.
 
 ---
 
@@ -353,14 +361,19 @@ There is **no automated coverage** verifying:
 │   ├── src/
 │   │   ├── auth/              # JWT Authentication
 │   │   ├── admin/             # Allocation orchestration & rule endpoints
-│   │   ├── swaps/             # DFS cycle detection & non-transactional execution
+│   │   ├── swaps/             # DFS cycle detection & transactional execution
 │   │   ├── entities/          # TypeORM Models (PostgreSQL schema)
+│   │   ├── migrations/        # TypeORM migrations (schema + triggers + indexes)
 │   │   └── main.ts            # NestJS Bootstrap
+│   ├── test/
+│   │   └── concurrency-and-invariants.e2e-spec.ts  # E2E invariant & concurrency tests
 │   ├── package.json           # Node dependencies
 ├── allocation-engine/         # Python FastAPI Engine (Port 8000)
 │   ├── app/
-│   │   ├── main.py            # API endpoints & in-memory run tracking
-│   │   └── allocation.py      # Core Algorithm (Pruning, Atomic Units, FFD)
+│   │   ├── main.py            # API endpoints & Redis-backed run state
+│   │   ├── queue.py           # Redis client & run-state helpers (set/get/update/delete)
+│   │   ├── allocation.py      # Core Algorithm (Pruning, Atomic Units, FFD, CP-SAT)
+│   │   └── config.py          # Settings (DB, Redis, webhook, port)
 │   ├── requirements.txt       # Python dependencies
 ├── frontend/                  # React SPA (Vite)
 │   ├── app/
@@ -376,7 +389,8 @@ There is **no automated coverage** verifying:
 * Node.js (v18+)
 * Python (3.10+)
 * PostgreSQL
-* Docker & Docker Compose (optional)
+* **Redis 6+** (required by the allocation engine for run-state storage)
+* Docker & Docker Compose (optional, but recommended for easy containerized setup)
 
 **Environment Variables:**
 Core API (NestJS) `.env` structure:
@@ -387,12 +401,37 @@ Core API (NestJS) `.env` structure:
 * `WEBHOOK_SECRET` — Shared secret used to authenticate webhook calls from Python (must match the engine's env)
 * `CORE_SERVICES_BASE_URL` — Public URL of this NestJS service, used to build the `callback_url` sent to Python (bare-metal: `http://localhost:3000`; Docker: `http://core-services:3000`)
 
-**Startup Commands (Verified):**
+Allocation Engine (Python) `.env` structure:
 
-* **Database:** `docker-compose up -d`
+* `CORE_SERVICES_URL` — NestJS base URL (default: `http://localhost:3000`)
+* `WEBHOOK_SECRET` — Must match the NestJS value above
+* `ALLOCATION_PORT` — Port for the engine (default: `8000`)
+* `REDIS_URL` — Redis connection URL for ephemeral run-state (default: `redis://localhost:6379/0`; Docker: `redis://redis:6379/0`)
+
+**Local Bare-Metal Startup (Verified):**
+
+* **Database & Redis:** `docker compose up postgres redis -d`
 * **NestJS:** `cd core-services && npm install && npm run start:dev`
 * **Python:** `cd allocation-engine && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000`
 * **Frontend:** `cd frontend && npm install && npm run dev`
+
+**Containerized Docker Compose Startup:**
+
+To spin up the entire application stack (API, Frontend, Python Engine, and PostgreSQL database) with containerization and Nginx proxying configured automatically:
+
+```bash
+docker compose up --build -d
+```
+
+* **Frontend Routing & Nginx Proxy:**
+  * The Frontend React SPA is built in SPA mode (`ssr: false`) and served via **Nginx** on host port `80`.
+  * Nginx acts as a reverse proxy, automatically routing API traffic for `/auth/`, `/groups/`, `/students/`, `/swaps/`, `/roommate-invitations/`, `/allocation-data`, and `/admin/` to the backend NestJS API (`http://core-services:3000`).
+* **Services & Port Mappings:**
+  * **Frontend SPA (Nginx):** Port `80:80`
+  * **Core API (NestJS):** Port `3000:3000`
+  * **Redis:** Internal port `6379` (Not exposed to the host machine for security; ephemeral, no disk persistence)
+  * **Allocation Engine (Python FastAPI):** Internal port `8000` (Not exposed to the host machine for security)
+  * **PostgreSQL Database:** Internal port `5432` (Not exposed to the host machine for security, persistent data stored via `postgres_data` volume)
 
 ---
 
@@ -436,6 +475,22 @@ npm run migration:revert
 * ~~Startup Reconciliation~~ **Done:** `AdminService.onModuleInit()` scans for `QUEUED`/`RUNNING` runs on startup and reconciles against the Python engine's in-memory state.
 * ~~In-memory polling~~ **Done:** Replaced the `setTimeout` polling loop with a webhook push model. Python POSTs results to `POST /admin/allocation/webhook/:run_id` (secured with `X-Webhook-Secret`) on completion or failure.
 
-### P3 — Allocation Quality ✅ Implemented
+### P4 — Stateless Allocation Engine ✅ Implemented
 
-* ~~Measurement~~ **Done:** The Python engine calculates `unallocated_students` and `group_splits` (defined as group members assigned to >1 unique `(hostel, wing)` combinations, excluding fully unallocated groups). NestJS persists these within a JSONB `metrics` column on the `AllocationRun` and outputs them via the logger upon run completion.
+* ~~In-memory run-state dictionary~~ **Done:** `allocation-engine/app/queue.py` replaces the in-process `allocation_runs` dict with Redis-backed state (key: `run:{run_id}`, TTL: 24 h). The engine is now safe for multi-worker and multi-replica deployments. A FastAPI lifespan context manager handles Redis connect/disconnect. The `docker-compose.yml` now includes an ephemeral `redis:7-alpine` service.
+
+### P5 — Performance Indexing ✅ Implemented
+
+* ~~Missing query indexes~~ **Done (Migration 3):** Four composite and partial indexes accelerate the allocation hot-path queries:
+  * `idx_students_year_gender` on `students(year, gender)` — cohort filtering in `triggerAllocation` and `publishAndCommitRun`.
+  * `idx_students_current_room` on `students("currentRoomId") WHERE "currentRoomId" IS NOT NULL` — room occupancy lookups and the `enforce_room_capacity` trigger.
+  * `idx_rooms_hostel_wing_status` on `rooms("hostelId", wing, status)` — allocation eligibility queries called O(S × R) times.
+  * `idx_rules_priority_id` on `allocation_rules(priority DESC, id ASC)` — index-only scan for the deterministic rule fetch.
+
+### P6 — E2E Test Coverage ✅ Implemented
+
+* ~~No automated coverage~~ **Done:** `core-services/test/concurrency-and-invariants.e2e-spec.ts` — 10 focused tests across T1.1–T1.4 covering DB triggers, partial unique indexes, pessimistic-lock race conditions, and JSONB snapshot integrity (see §12).
+
+### P7 — CP-SAT Objective Audit ✅ Implemented
+
+* ~~Undocumented weight hierarchy~~ **Done:** `allocation-engine/app/allocation.py` now has a full proof-comment block and two runtime `assert` guards verifying `W_bed ≫ W_rule ≫ W_pref` on every CP-SAT invocation.
