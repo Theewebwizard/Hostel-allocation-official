@@ -114,9 +114,9 @@ flowchart TD
     NestJS -->|TypeORM queries| Postgres
     NestJS -->|POST /allocate + callback_url| Python
     Python -->|GET /allocation-data| NestJS
-    Python -->|SET run:{id} TTL 86400| Redis
+    Python -->|SET run:run_id TTL 86400| Redis
     Python -->|POST /admin/allocation/webhook/:run_id| NestJS
-    NestJS -->|onModuleInit GET /allocation/{id}| Python
+    NestJS -->|onModuleInit GET /allocation/run_id| Python
 ```
 
 ### Nginx (Frontend + Reverse Proxy)
@@ -257,18 +257,18 @@ sequenceDiagram
     participant NestJS
     participant PostgreSQL
 
-    Browser->>Nginx: POST /auth/login {email, password}
+    Browser->>Nginx: POST /auth/login (email, password)
     Nginx->>NestJS: proxy
     NestJS->>PostgreSQL: SELECT user WHERE email = ?
     PostgreSQL-->>NestJS: User row + student relation
     NestJS->>NestJS: bcrypt.compare(password, hash)
-    NestJS->>NestJS: jwt.sign({sub, email, role})
-    NestJS-->>Browser: {accessToken, user}
+    NestJS->>NestJS: jwt.sign(sub, email, role)
+    NestJS-->>Browser: accessToken + user details
     Browser->>Browser: localStorage.setItem('accessToken', ...)
 
     Note over Browser,NestJS: All subsequent requests
 
-    Browser->>Nginx: GET /admin/dashboard (Authorization: Bearer <token>)
+    Browser->>Nginx: GET /admin/dashboard (Authorization: Bearer token)
     Nginx->>NestJS: proxy
     NestJS->>NestJS: JwtStrategy.validate — decode JWT
     NestJS->>PostgreSQL: SELECT user WHERE id = payload.sub
@@ -309,14 +309,14 @@ sequenceDiagram
     NestJS->>PostgreSQL: BEGIN SERIALIZABLE — check no pending run
     NestJS->>PostgreSQL: INSERT allocation_runs (status=QUEUED, rulesSnapshot=...)
     NestJS->>PostgreSQL: COMMIT
-    NestJS-->>Warden: {run_id, status: "queued"} immediately
+    NestJS-->>Warden: run_id queued confirmation
 
     Note over NestJS,Python: Async (fire-and-forget)
 
     NestJS->>PostgreSQL: UPDATE status=RUNNING
-    NestJS->>Python: POST /allocate {run_id, rules, callback_url, ...}
-    Python->>Redis: SET run:{run_id} {status:"queued"} TTL 86400
-    Python-->>NestJS: {run_id, status:"queued"}
+    NestJS->>Python: POST /allocate (run_id, rules, callback_url)
+    Python->>Redis: SET run:run_id (status="queued", TTL 86400)
+    Python-->>NestJS: run_id queued confirmation
 
     Note over Python: BackgroundTask running
 
@@ -326,15 +326,15 @@ sequenceDiagram
     NestJS-->>Python: JSON payload
 
     Python->>Python: Run CSP + FFD / CP-SAT algorithm
-    Python->>Redis: SET run:{run_id} {status:"completed", results:[...]}
+    Python->>Redis: SET run:run_id (status="completed", results)
 
-    Python->>NestJS: POST /admin/allocation/webhook/{run_id} (X-Webhook-Secret)
+    Python->>NestJS: POST /admin/allocation/webhook/:run_id (X-Webhook-Secret)
     NestJS->>NestJS: Validate X-Webhook-Secret
     NestJS->>PostgreSQL: INSERT allocation_results, allocation_decisions
     NestJS->>PostgreSQL: UPDATE allocation_runs SET status=COMPLETED
     NestJS-->>Python: 200 OK
 
-    Python->>Redis: DEL run:{run_id}
+    Python->>Redis: DEL run:run_id
 ```
 
 ### Publish and Commit (Atomic Room Assignment)
